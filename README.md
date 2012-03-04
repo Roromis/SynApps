@@ -1,6 +1,6 @@
 ## SynApps
   
-  Gestionnaire d'applications pour la Framakey
+  Gestionnaire d'applications pour la Framakey  
   Copyright ©2012 Roromis  
   http://www.roromis.fr.nf  
 
