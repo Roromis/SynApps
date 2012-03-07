@@ -22,52 +22,50 @@
 
 import logging
 import os
+import sys
 import locale
-import gtk
+import traceback
 
-def logging_excepthook(type, value, tb):
-    global session
-    errordialog = gtk.MessageDialog(None, gtk.DIALOG_MODAL|gtk.DIALOG_DESTROY_WITH_PARENT, gtk.MESSAGE_ERROR, gtk.BUTTONS_CLOSE, "Une erreur s'est produite; pour plus de détails, consultez le fichier debug.log.")
-    errordialog.run()
-    errordialog.destroy()
-    
-    logging.error(''.join(traceback.format_exception(type, value, tb)))
-    try:
-        gtk.main_quit()
-    except:
-        pass
-    
-    try:
-        os.remove(session)
-    except:
-        pass
-    
-    sys.exit()
-
-# Enregistrelent des message de debug dans le fichier de log
-#logging.basicConfig(level=logging.DEBUG, filename='debug.log', format='%(asctime)s - %(levelname)-8s : %(message)s', datefmt='%d/%m/%Y %H:%M:%S')
+logger = logging.getLogger('synapps')
+logger.setLevel(logging.DEBUG)
 
 # Affichage des message de debug dans la console
 console = logging.StreamHandler()
 #console.setLevel(logging.INFO)
 console.setLevel(logging.DEBUG)
-console.setFormatter(logging.Formatter('%(message)s'))
-logging.getLogger('').addHandler(console)
+console.setFormatter(logging.Formatter(fmt='%(message)s'))
+logger.addHandler(console)
+
+# Enregistrement des message de debug dans le fichier de log
+debugfile = logging.FileHandler("./debug.log", "w", encoding = "utf-8")
+debugfile.setLevel(logging.DEBUG)
+debugfile.setFormatter(logging.Formatter(fmt='%(asctime)s - %(levelname)-8s : %(message)s', datefmt='%d/%m/%Y %H:%M:%S'))
+logger.addHandler(debugfile)
 
 # Enregistrement des messages d'erreur dans le fichier de log
-#sys.excepthook = logging_excepthook
+def logging_excepthook(type, value, tb):
+    logger.error(u''.join(traceback.format_exception(type, value, tb)))
+    
+    # TODO : gui (quitter la boucle) et session (supprimer le fichier)
+    
+    sys.exit()
+
+sys.excepthook = logging_excepthook
 
 from lib.database import database
 
 def main():
-    
     # Utilisation de la langue du système (pour les comparaisons de chaines avec accents)
     locale.setlocale(locale.LC_ALL, '')
     
     if not os.path.isdir('./cache'):
         os.mkdir('./cache')
+    if not os.path.isdir('./cache/icons'):
+        os.mkdir('./cache/icons')
     
-    database()
+    db = database()
+    #logger.debug(u"Version : %s" % db.get_config("version"))
+    db.update(force=True)
     
     return 0
 
