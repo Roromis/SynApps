@@ -13,11 +13,13 @@ from configparser import ConfigParser, NoSectionError, NoOptionError
 from distutils import version
 from locale import strcoll
 
+from application import Application
+
 def cmp_version(a,b):
     """Compare deux chaînes représentant une version."""
     return -cmp(version.LooseVersion(a), version.LooseVersion(b))
 
-def get_application_infos(cfg, section, repository):
+def get_application_cfg_infos(cfg, section, repository):
     """Récupère les informations sur une application dans le dépôt."""
     branch, id = tuple(section.split(':', 1))
     
@@ -38,7 +40,7 @@ def get_application_infos(cfg, section, repository):
             short_description, long_description, size_c, size_u, 
             version, license, author, show, uri)
 
-def get_category_infos(cfg, category):
+def get_category_cfg_infos(cfg, category):
     """Récupère les informations sur une catégorie dans le dépôt."""
     if cfg.has_option('categories', category):
         icon_uri = cfg.get('categories', category)
@@ -179,10 +181,10 @@ class database():
                         long_description, size_c, size_u, version,
                         license, author, show, uri):
         """Ajoute une application"""
-        self.curseur.execute("INSERT INTO applications (id, branch, repository,"
-                "category, name, friendly_name, short_description,"
-                "long_description, size_c, size_u, version,"
-                "license, author, show, uri) VALUES"
+        self.curseur.execute("INSERT INTO applications (id, branch, repository, "
+                "category, name, friendly_name, short_description, "
+                "long_description, size_c, size_u, version, "
+                "license, author, show, uri) VALUES "
                 "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (id, branch, repository,
                 category, name, friendly_name, short_description,
@@ -201,20 +203,20 @@ class database():
                     logger.warning(u"Impossible de télécharger l'icône %s." % icon_uri)
             
             if hash == None:
-                self.curseur.execute("INSERT INTO categories (id, hash)"
+                self.curseur.execute("INSERT INTO categories (id, hash) "
                         "VALUES (?, ?)", (id, newhash))
             else:
-                self.curseur.execute("UPDATE categories SET hash = ?"
+                self.curseur.execute("UPDATE categories SET hash = ? "
                         "WHERE id = ?", (newhash, id))
     
     def add_depend(self, id, branch, repository, depend):
         """Ajoute une dépendance"""
-        self.curseur.execute("INSERT INTO depends (application, branch, repository, depend)"
+        self.curseur.execute("INSERT INTO depends (application, branch, repository, depend) "
                 "VALUES (?, ?, ?, ?)", (id, branch, repository, depend))
     
     def add_icon(self, id, branch, repository, size, uri, hash):
         """Ajoute une icône"""
-        self.curseur.execute("INSERT INTO icons (application, branch, repository, size, hash)"
+        self.curseur.execute("INSERT INTO icons (application, branch, repository, size, hash) "
                 "VALUES (?,?,?,?,?)", (id, branch, repository, size, hash))
         
         if not os.path.isfile('./cache/icons/' + hash + '.png'):
@@ -226,12 +228,12 @@ class database():
     
     def add_link(self, id, branch, repository, title, uri):
         """Ajoute un lien"""
-        self.curseur.execute("INSERT INTO links (application, branch, repository, title, uri)"
+        self.curseur.execute("INSERT INTO links (application, branch, repository, title, uri) "
                 "VALUES (?, ?, ?, ?, ?)", (id, branch, repository, title, uri))
     
     def add_recommendation(self, repository, recommendation):
         """Ajoute une recommendation"""
-        self.curseur.execute("INSERT INTO recommendations (repository, application)"
+        self.curseur.execute("INSERT INTO recommendations (repository, application) "
                 "VALUES (?, ?)", (repository, recommendation))
     
     def add_repository(self, uri):
@@ -241,7 +243,8 @@ class database():
     def count_apps(self, category):
         """Renvoie : Le nombre d'applications que contient la catégorie
                      (et ses sous catégories)"""
-        return self.query("SELECT count(id) FROM applications WHERE category LIKE ?", (category + "%",))[0][0]
+        return self.query("SELECT count(id) FROM applications "
+                "WHERE category LIKE ?", (category + "%",))[0][0]
         
     def execute(self, query, data=()):
         """Éxecute une commande SQL nécessitant un "commit" (insertion,
@@ -252,21 +255,67 @@ class database():
         
         return self.curseur.lastrowid
     
+    def get_application(self, *args, **kwargs):
+        return Application(self, self.get_application_infos(*args, **kwargs))
+    
+    def get_application_infos(self, id, branch=None, repository=None):
+        if branch == None:
+            if repository == None:
+                apps = self.query("SELECT * FROM applications WHERE id = ?"
+                                  "ORDER BY version COLLATE desc_versions", (id,))
+            else:
+                apps = self.query("SELECT * FROM applications WHERE id = ? "
+                                  "AND repository = ? "
+                                  "ORDER BY version COLLATE desc_versions", (id, repository))
+            
+            version = apps[0]['version']
+            try:
+                return dict([i for i in apps if i['branch'] == "Stable" and i['version'] == version][0])
+            except IndexError:
+                try:
+                    return dict([i for i in apps if i['branch'] == "Unstable" and i['version'] == version][0])
+                except IndexError:
+                    return dict(apps[0])
+        else:
+            if repository == None:
+                apps = self.query("SELECT * FROM applications WHERE id = ? "
+                                  "AND branch ? "
+                                  "ORDER BY version COLLATE desc_versions", (id, branch))
+            else:
+                apps = self.query("SELECT * FROM applications WHERE id = ? "
+                                  "AND branch = ? "
+                                  "AND repository = ? "
+                                  "ORDER BY version COLLATE desc_versions", (id, branch, repository))
+            return dict(apps[0])
+    
     def get_category_hash(self, id):
         """Renvoie : la somme md5 de l'icône de la catégorie"""
         try:
-            return self.query("SELECT hash FROM categories WHERE id = ?", (id,))[0][0]
+            return self.query("SELECT hash FROM categories "
+                    "WHERE id = ?", (id,))[0][0]
         except IndexError:
             return None
+    
+    def get_depends(self, id, branch, repository):
+        depends = self.query("SELECT depend FROM depends WHERE application = ? "
+                    "AND branch = ? AND repository = ?",
+                    (id, branch, repository))
+        return map(lambda (a,):a, depends)
     
     def get_icon_hash(self, id, branch, repository, size):
         """Renvoie : la somme md5 de l'icône de l'application"""
         try:
-            return self.query("SELECT hash FROM icons WHERE id = ?"
-                              "AND branch = ? AND repository = ? AND size = ? ",
-                              (id, branch, repository, size))[0]
+            return self.query("SELECT hash FROM icons WHERE application = ? "
+                    "AND branch = ? AND repository = ? AND size = ? ",
+                    (id, branch, repository, size))[0]
         except IndexError:
             return None
+    
+    def get_icons(self, id, branch, repository):
+        icons = self.query("SELECT size, hash FROM icons WHERE application = ? AND branch = ? AND repository = ?",
+                    (id, branch, repository))
+        icons = map(lambda (a,b):(a,'./cache/icons/'+b+'.png'), icons)
+        return dict(icons)
     
     def get_repositories(self):
         """Renvoie : La liste des dépôts"""
@@ -274,7 +323,7 @@ class database():
     
     def icon_used(self, hash):
         """Renvoie : True si l'icône est utilisée, False sinon."""
-        return self.query('SELECT COUNT(hash) FROM categories WHERE hash = ?', (hash,))[0][0] + self.query('SELECT COUNT(hash) FROM icons WHERE hash = ?', (hash,))[0][0] > 0
+        return self.query('SELECT COUNT(hash) FROM categories WHERE hash = ?', (hash,))[0][0] +  self.query('SELECT COUNT(hash) FROM icons WHERE hash = ?', (hash,))[0][0] > 0
     
     def query(self, query, data=()):
         """Éxecute une commande SQL de type "SELECT"
@@ -341,9 +390,9 @@ class database():
                     if section not in ['repository', 'categories', 'categories_hash']:
                         logger.debug(u"Insertion de %s." % section)
                         try:
-                            id, branch = tuple(section.split(":", 1))
-                            self.add_application(*get_application_infos(cfg, section, repository['id']))
-                            self.add_category(*get_category_infos(cfg, cfg.get(section, 'category')))
+                            branch, id = tuple(section.split(":", 1))
+                            self.add_application(*get_application_cfg_infos(cfg, section, repository['id']))
+                            self.add_category(*get_category_cfg_infos(cfg, cfg.get(section, 'category')))
                             
                             i = 1
                             while cfg.has_option(section, 'link%d'%i):
