@@ -8,18 +8,20 @@ class Application(object):
     def __init__(self, database, infos):
         """Initialisation : récupération des icônes et dépendances dans
            la base de donnée"""
+        self.database = database
         self.infos = infos
         
-        self.icons = database.get_icons(self.infos['id'],
-                self.infos['branch'], self.infos['repository'])
+        self.icons = database.get_icons(self.id, self.branch, self.repository)
         
-        self.depends = database.get_depends(self.infos['id'],
-                self.infos['branch'], self.infos['repository'])
+        self.depends = database.get_depends(self.id, self.branch, self.repository)
         
         self.rating = False
         self.votes = False
         self.comments = False
         self.screenshots = False
+    
+    def __getattr__(self, name):
+        return self.infos[name]
     
     def get_rating(self):
         """Récupère la note de l'application

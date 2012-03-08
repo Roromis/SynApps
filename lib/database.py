@@ -13,6 +13,7 @@ from configparser import ConfigParser, NoSectionError, NoOptionError
 from distutils import version
 from locale import strcoll
 
+from category import Category
 from application import Application
 
 def cmp_version(a,b):
@@ -51,8 +52,11 @@ def get_category_cfg_infos(cfg, category):
         newhash = cfg.get('categories_hash', category)
     else:
         newhash = ''
-    return (category, icon_uri, newhash)
-    
+    return (category, icon_uri, newhash, cfg)
+
+def get_category_parent(id):
+    return os.path.dirname(id)
+
 def get_repository_cfg(uri):
     """Renvoie : L'objet ConfigParser associé au dépôt"""
     # Téléchargement du dépôt
@@ -190,7 +194,7 @@ class database():
                 long_description, size_c, size_u, version,
                 license, author, show, uri))
     
-    def add_category(self, id, icon_uri, newhash):
+    def add_category(self, id, icon_uri, newhash, cfg):
         """Ajoute une catégorie ou la modifie si elle existe"""
         hash = self.get_category_hash(id)
         if hash != newhash:
@@ -204,6 +208,8 @@ class database():
             if hash == None:
                 self.curseur.execute("INSERT INTO categories (id, hash) "
                         "VALUES (?, ?)", (id, newhash))
+                # On ajoute les parents de la catégorie
+                self.add_category(*get_category_cfg_infos(cfg, get_category_parent(id)))
             else:
                 self.curseur.execute("UPDATE categories SET hash = ? "
                         "WHERE id = ?", (newhash, id))
@@ -239,7 +245,7 @@ class database():
         """Ajoute un dépôt"""
         self.execute("INSERT INTO repositories (uri) VALUES (?)", (uri,))
     
-    def count_apps(self, category):
+    def count_applications(self, category):
         """Renvoie : Le nombre d'applications que contient la catégorie
                      (et ses sous catégories)"""
         return self.query("SELECT count(id) FROM applications "
@@ -287,12 +293,33 @@ class database():
                                   "ORDER BY version COLLATE desc_versions", (id, branch, repository))
             return dict(apps[0])
     
+    def get_applications(self, category=''):
+        """Renvoie : Les applications que contient la catégorie
+                     (et ses sous catégories)"""
+        applications = self.query("SELECT * FROM applications "
+                "WHERE category LIKE ?", (category + "%",))
+        return [Application(self, dict(i)) for i in applications]
+    
+    def get_categories(self):
+        categories = self.query("SELECT id FROM categories")
+        return map(lambda (a,):self.get_category(a), categories)
+    
+    def get_category(self, id):
+        return Category(self, id)
+    
     def get_category_hash(self, id):
         """Renvoie : la somme md5 de l'icône de la catégorie"""
         try:
             return self.query("SELECT hash FROM categories "
                     "WHERE id = ?", (id,))[0][0]
         except IndexError:
+            return None
+    
+    def get_category_icon(self, id):
+        hash = self.get_category_hash(id)
+        if hash:
+            return './cache/icons/' + hash + '.png'
+        else:
             return None
     
     def get_depends(self, id, branch, repository):
@@ -320,6 +347,9 @@ class database():
         """Renvoie : La liste des dépôts"""
         return self.query('SELECT uri, hash FROM repositories')
     
+    def get_subcategories(self, id=''):
+        return [i for i in self.get_categories() if get_category_parent(i) == id]
+    
     def icon_used(self, hash):
         """Renvoie : True si l'icône est utilisée, False sinon."""
         return self.query('SELECT COUNT(hash) FROM categories WHERE hash = ?', (hash,))[0][0] +  self.query('SELECT COUNT(hash) FROM icons WHERE hash = ?', (hash,))[0][0] > 0
@@ -339,11 +369,14 @@ class database():
         self.execute("DELETE FROM links WHERE repository = ?", (uri,))
         self.execute("DELETE FROM icons WHERE repository = ?", (uri,))
     
+    def remove_category(self, id):
+        self.curseur.execute("DELETE FROM categories WHERE id = ?", (id,))
+    
     def remove_empty_categories(self):
         """Supprime les catégories vides"""
-        for cat in self.query("SELECT id FROM categories"):
-            if self.count_apps(cat['id']) == 0:
-                self.curseur.execute("DELETE FROM categories WHERE id = ?", (cat['id'],))
+        for category in self.get_categories():
+            if category.count_applications() == 0:
+                category.remove()
     
     def remove_old_icons(self):
         """Supprime les icônes inutilisées"""

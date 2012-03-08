@@ -66,6 +66,8 @@ def main():
     db = database()
     #logger.debug(u"Version : %s" % db.get_config("version"))
     db.update(force=True)
+    
+    return 0
 
 if __name__ == '__main__':
     main()
