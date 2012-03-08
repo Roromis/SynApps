@@ -92,8 +92,7 @@ class database():
             
             # Dépôts
             self.curseur.execute("CREATE TABLE repositories ("
-                "id INTEGER PRIMARY KEY AUTOINCREMENT UNIQUE,"
-                "uri TEXT,"
+                "uri TEXT PRIMARY KEY UNIQUE,"
                 "hash TEXT DEFAULT '',"
                 "show_recommendations BOOL DEFAULT 1,"
                 "show_stable BOOL DEFAULT 1,"
@@ -102,7 +101,7 @@ class database():
             
             # Recommendations
             self.curseur.execute("CREATE TABLE recommendations ("
-                "repository INT,"
+                "repository TEXT,"
                 "application TEXT)")
             
             # Catégories
@@ -114,7 +113,7 @@ class database():
             self.curseur.execute("CREATE TABLE applications ("
                 "id TEXT,"
                 "branch TEXT,"
-                "repository INT,"
+                "repository TEXT,"
                 "category TEXT,"
                 "name TEXT,"
                 "friendly_name TEXT,"
@@ -135,7 +134,7 @@ class database():
             self.curseur.execute("CREATE TABLE links ("
                 "application TEXT,"
                 "branch TEXT,"
-                "repository INT,"
+                "repository TEXT,"
                 "title TEXT,"
                 "uri TEXT)")
             
@@ -143,14 +142,14 @@ class database():
             self.curseur.execute("CREATE TABLE depends ("
                 "application TEXT,"
                 "branch TEXT,"
-                "repository INT,"
+                "repository TEXT,"
                 "depend TEXT)")
             
             # Icônes
             self.curseur.execute("CREATE TABLE icons ("
                 "application TEXT,"
                 "branch TEXT,"
-                "repository INT,"
+                "repository TEXT,"
                 "size INT,"
                 "hash TEXT,"
                 "PRIMARY KEY (application, branch, repository, size))")
@@ -319,7 +318,7 @@ class database():
     
     def get_repositories(self):
         """Renvoie : La liste des dépôts"""
-        return self.query('SELECT id, uri, hash FROM repositories')
+        return self.query('SELECT uri, hash FROM repositories')
     
     def icon_used(self, hash):
         """Renvoie : True si l'icône est utilisée, False sinon."""
@@ -331,14 +330,14 @@ class database():
         self.curseur.execute(query, data)
         return self.curseur.fetchall()
     
-    def remove_all_from_repository(self, id):
+    def remove_all_from_repository(self, uri):
         """Supprime le contenu d'un dépôt"""
-        self.execute("DELETE FROM applications WHERE repository = ?", (id,))
-        self.execute("DELETE FROM recommendations WHERE repository = ?", (id,))
+        self.execute("DELETE FROM applications WHERE repository = ?", (uri,))
+        self.execute("DELETE FROM recommendations WHERE repository = ?", (uri,))
         
-        self.execute("DELETE FROM depends WHERE repository = ?", (id,))
-        self.execute("DELETE FROM links WHERE repository = ?", (id,))
-        self.execute("DELETE FROM icons WHERE repository = ?", (id,))
+        self.execute("DELETE FROM depends WHERE repository = ?", (uri,))
+        self.execute("DELETE FROM links WHERE repository = ?", (uri,))
+        self.execute("DELETE FROM icons WHERE repository = ?", (uri,))
     
     def remove_empty_categories(self):
         """Supprime les catégories vides"""
@@ -359,9 +358,9 @@ class database():
         else:
             self.execute("UPDATE config SET value = ? WHERE name = ?", (str(value), name))
     
-    def set_repository_hash(self, id, hash):
+    def set_repository_hash(self, uri, hash):
         """Modifie la somme md5 associée à un dépôt"""
-        self.curseur.execute("UPDATE repositories SET hash = ? WHERE id = ?", (hash, id))
+        self.curseur.execute("UPDATE repositories SET hash = ? WHERE uri = ?", (hash, uri))
     
     def update(self, force=False):
         """Met à jour la base de donnée"""
@@ -372,17 +371,17 @@ class database():
                 logger.debug(u"Le dépôt %s n'a pas été modifié." % repository['uri'])
             else:
                 logger.debug(u"Le dépôt %s a été modifié (ou la mise à jour a été forcée).", repository['uri'])
-                self.set_repository_hash(repository['id'], new_hash)
+                self.set_repository_hash(repository['uri'], new_hash)
                 
                 logger.debug(u"Suppression des anciennes applications du dépôt.")
-                self.remove_all_from_repository(repository['id'])
+                self.remove_all_from_repository(repository['uri'])
                 
                 cfg = get_repository_cfg(repository['uri'])
                 
                 logger.debug(u"Insertion des recommendations du dépôt.")
                 i = 1
                 while cfg.has_option('repository', 'recommendation%d'%i):
-                    self.add_recommendation(repository['id'], cfg.get('repository', 'recommendation%d'%i))
+                    self.add_recommendation(repository['uri'], cfg.get('repository', 'recommendation%d'%i))
                     i += 1
                 
                 logger.debug(u"Insertion des applications du dépôt.")
@@ -391,22 +390,22 @@ class database():
                         logger.debug(u"Insertion de %s." % section)
                         try:
                             branch, id = tuple(section.split(":", 1))
-                            self.add_application(*get_application_cfg_infos(cfg, section, repository['id']))
+                            self.add_application(*get_application_cfg_infos(cfg, section, repository['uri']))
                             self.add_category(*get_category_cfg_infos(cfg, cfg.get(section, 'category')))
                             
                             i = 1
                             while cfg.has_option(section, 'link%d'%i):
-                                self.add_link(id, branch, repository['id'], cfg.get(section, 'link%d_name'%i), cfg.get(section, 'link%d'%i))
+                                self.add_link(id, branch, repository['uri'], cfg.get(section, 'link%d_name'%i), cfg.get(section, 'link%d'%i))
                                 i += 1
                             
                             i = 1
                             while cfg.has_option(section, 'depend%d'%i):
-                                self.add_depend(id, branch, repository['id'], cfg.get(section, 'depend'%i))
+                                self.add_depend(id, branch, repository['uri'], cfg.get(section, 'depend'%i))
                                 i += 1
                             
                             for size in [32,48,64,128]:
                                 if cfg.has_option(section, 'icon_%d'%size):
-                                    self.add_icon(id, branch, repository['id'], size, cfg.get(section, 'icon_%d'%size), cfg.get(section, 'icon_%d_hash'%size))
+                                    self.add_icon(id, branch, repository['uri'], size, cfg.get(section, 'icon_%d'%size), cfg.get(section, 'icon_%d_hash'%size))
                             
                         except (NoSectionError, NoOptionError):
                             logger.warning(u"Les informations de l'application %s du dépôt %s sont incomplète." % (section,repository['uri']))

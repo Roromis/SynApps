@@ -1,8 +1,6 @@
 #!/usr/bin/python2
 # -*- coding: utf-8 -*-
 
-from distutils import version
-
 class Application(object):
     def __init__(self, database, infos):
         self.infos = infos
