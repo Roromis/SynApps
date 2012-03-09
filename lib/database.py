@@ -9,6 +9,7 @@ import os.path
 import sqlite3
 import urllib2
 import hashlib
+import shutil
 from configparser import ConfigParser, NoSectionError, NoOptionError
 from distutils import version
 from locale import strcoll
@@ -68,13 +69,24 @@ def get_repository_cfg(uri):
         
     # Lecture du dépôt
     cfg = ConfigParser()
-    #try:
-    cfg.read_string(tmp.decode('utf-8'))
-    #except:
-    #    logger.warning(u'Le dépôt %s est invalide' % uri)
-    #    raise Exception('Le dépôt %s est invalide' % uri)
+    try:
+        cfg.read_string(tmp.decode('utf-8'))
+    except:
+        logger.warning(u'Le dépôt %s est invalide' % uri)
+        raise Exception('Le dépôt %s est invalide' % uri)
     
     return cfg
+
+def get_size(path):
+    """Renvoie : la taille du dossier ou fichier path"""
+    size = 0
+    if os.path.isfile(path):
+        size = os.path.getsize(path)
+    elif os.path.isdir(path):
+        for dirpath, dirnames, filenames in os.walk(path):
+            for filename in filenames:
+                size += os.path.getsize(os.path.join(dirpath, filename))
+    return size
 
 class database():
     def __init__(self):
@@ -127,7 +139,7 @@ class database():
                 "size_u INT,"
                 "version TEXT,"
                 "rating INT DEFAULT 0,"
-                "votes INT DEFAULT 0,"
+                "votes INT DEFAULT -1,"
                 "license TEXT,"
                 "author TEXT,"
                 "show BOOL,"
@@ -164,7 +176,7 @@ class database():
 
             # Ajout de la configuration par défaut
             logger.debug(u"Ajout de la configuration par défaut.")
-            self.set_config('appspath', '..\Apps')#'..\..\..\..\Apps')
+            self.set_config('rootpath', '..')#'..\..\..\..')
             self.set_config('version', '0.3 alpha 1')
             
             # Exécution
@@ -174,6 +186,9 @@ class database():
             self.connection = sqlite3.connect("cache/apps.sqlite")
             self.connection.row_factory = sqlite3.Row
             self.curseur = self.connection.cursor()
+            
+            # On force les évaluations à être mises à jour
+            self.execute("UPDATE applications SET votes = -1")
         
         # Tri
         self.connection.create_collation("unicode", strcoll)
@@ -245,6 +260,11 @@ class database():
         """Ajoute un dépôt"""
         self.execute("INSERT INTO repositories (uri) VALUES (?)", (uri,))
     
+    def application_exists(self, id):
+        """Renvoie : True si l'application est dans la base de donnée,
+                     False sinon"""
+        return self.query("SELECT count(id) FROM applications WHERE id = ?", (id,))[0][0] > 0
+    
     def count_applications(self, category):
         """Renvoie : Le nombre d'applications que contient la catégorie
                      (et ses sous catégories)"""
@@ -260,10 +280,12 @@ class database():
         
         return self.curseur.lastrowid
     
-    def get_application(self, *args, **kwargs):
-        return Application(self, self.get_application_infos(*args, **kwargs))
+    def get_application(self, id, branch=None, repository=None):
+        """Renvoie : l'application correspondante"""
+        return Application(self, self.get_application_infos(id, branch, repository))
     
     def get_application_infos(self, id, branch=None, repository=None):
+        """Renvoie : les informatons de l'application correspondante"""
         if branch == None:
             if repository == None:
                 apps = self.query("SELECT * FROM applications WHERE id = ?"
@@ -301,10 +323,12 @@ class database():
         return [Application(self, dict(i)) for i in applications]
     
     def get_categories(self):
+        """Renvoie : La liste de toutes les catégories"""
         categories = self.query("SELECT id FROM categories")
         return map(lambda (a,):self.get_category(a), categories)
     
     def get_category(self, id):
+        """Renvoie : La catégorie correspondante"""
         return Category(self, id)
     
     def get_category_hash(self, id):
@@ -316,13 +340,32 @@ class database():
             return None
     
     def get_category_icon(self, id):
+        """Renvoie : L'icône de la catégorie"""
         hash = self.get_category_hash(id)
         if hash:
             return './cache/icons/' + hash + '.png'
         else:
             return None
     
+    def get_config(self, name=None, default=None):      # À modifier (cfg)
+		if name == None:
+			return self.query("SELECT * FROM config")
+		else:
+			self.curseur.execute("SELECT * FROM config WHERE name = ?", (name,))
+			value = self.curseur.fetchone()
+			if value == None:
+				return default
+			else:
+				if value['value'] == None:
+					return default
+				else:
+					if value['value'].isdigit():
+						return int(value['value'])
+					else:
+						return value['value']
+    
     def get_depends(self, id, branch, repository):
+        """Renvoie : La liste des dépendances de l'application"""
         depends = self.query("SELECT depend FROM depends WHERE application = ? "
                     "AND branch = ? AND repository = ?",
                     (id, branch, repository))
@@ -338,16 +381,70 @@ class database():
             return None
     
     def get_icons(self, id, branch, repository):
+        """Renvoie : Les icônes de l'application"""
         icons = self.query("SELECT size, hash FROM icons WHERE application = ? AND branch = ? AND repository = ?",
                     (id, branch, repository))
         icons = map(lambda (a,b):(a,'./cache/icons/'+b+'.png'), icons)
         return dict(icons)
+
+    def get_installed_application(self, id):
+        cfg = ConfigParser({'Show' : 'True', 'InstallDir' : 'Apps', 'ApplicationRoot' : 'Apps/%s' % id})
+        cfg.read(['./cache/installed/' + id + '/appinfo.ini', './cache/installed/' + id + '/installer.ini'])
+        
+        infos = {}
+        infos['id'] = id
+                
+        try:
+            infos['branch'] = cfg.get('Framakey', 'Branch')
+            infos['repository'] = None
+            infos['category'] = cfg.get('Details', 'Category')
+            infos['name'] = cfg.get('Framakey', 'Name')
+            infos['friendly_name'] = cfg.get('Framakey', 'FriendlyName')
+            infos['short_description'] = cfg.get('Details', 'Description')
+            infos['long_description'] = cfg.get('Framakey', 'LongDesc')
+            infos['size_c'] = 0
+            
+            root = os.path.join(self.get_config('rootpath'), cfg.get('Framakey', 'ApplicationRoot'))
+            if os.path.exists(root):
+                infos['size_u'] = get_size(root)
+            else:
+                logger.debug(u"L'application %s n'est plus installée, suppression des fichiers de cache." % id)
+                shutil.rmtree('./cache/installed/' + id)
+                return None
+            
+            infos['version'] = cfg.get('Version', 'PackageVersion')
+            infos['rating'] = 0
+            infos['votes'] = 0
+            infos['license'] = cfg.get('Framakey', 'License')
+            infos['author'] = cfg.get('Details', 'Publisher')
+            infos['show'] = cfg.getboolean('Framakey', 'Show')
+            infos['uri'] = None
+        except (NoSectionError, NoOptionError):
+            logger.debug(u"Les informations de l'application %s sont incomplètes." % id)
+            return None
+        
+        logger.debug(u"Ajout de %s aux applications installées." % id)
+        return Application(self, infos)
+    
+    def get_installed_applications(self):
+        """Renvoie : Les applications installées"""
+        logger.info(u"Recherche des applications installées.")
+        for id in os.listdir('./cache/installed'):
+            if self.application_exists(id):
+                logger.debug(u"L'application %s est dans les dépôts." % id)
+                yield self.get_application(id)
+            else:
+                logger.debug(u"L'application %s n'est pas dans les dépôts, récupération des informations." % id)
+                application = self.get_installed_application(id)
+                if application != None:
+                    yield application
     
     def get_repositories(self):
         """Renvoie : La liste des dépôts"""
         return self.query('SELECT uri, hash FROM repositories')
     
     def get_subcategories(self, id=''):
+        """Renvoie : Les sous catégories de la catégorie id"""
         return [i for i in self.get_categories() if get_category_parent(i) == id]
     
     def icon_used(self, hash):
@@ -370,6 +467,7 @@ class database():
         self.execute("DELETE FROM icons WHERE repository = ?", (uri,))
     
     def remove_category(self, id):
+        """Supprime la catégorie id"""
         self.curseur.execute("DELETE FROM categories WHERE id = ?", (id,))
     
     def remove_empty_categories(self):
@@ -384,12 +482,17 @@ class database():
             if not self.icon_used(filename[:-4]):
                 os.remove("./cache/icons/" + filename)
         
-    def set_config(self, name, value):
+    def set_config(self, name, value):      # À modifier (cfg)
         self.curseur.execute("SELECT * FROM config WHERE name = ?", (name,))
         if self.curseur.fetchone() == None:
             self.execute("INSERT INTO config (name, value) VALUES (?, ?)", (name, str(value)))
         else:
             self.execute("UPDATE config SET value = ? WHERE name = ?", (str(value), name))
+    
+    def set_rating(self, id, branch, repository, rating, votes):
+        self.execute("UPDATE applications SET rating = ?, votes = ? "
+                     "WHERE id = ? AND branch = ? AND repository = ?",
+                     (rating, votes, id, branch, repository))
     
     def set_repository_hash(self, uri, hash):
         """Modifie la somme md5 associée à un dépôt"""
@@ -449,3 +552,4 @@ class database():
         self.remove_old_icons()
         
         self.connection.commit()
+        logger.info(u"Fin de la mise à jour des dépôts.")

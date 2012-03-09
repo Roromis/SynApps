@@ -1,6 +1,10 @@
 #!/usr/bin/python2
 # -*- coding: utf-8 -*-
 
+import logging
+
+logger = logging.getLogger('synapps')
+
 class Category(object):
     def __init__(self, database, id):
         """Initialisation : récupération de l'icône dans la base de
