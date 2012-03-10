@@ -17,6 +17,45 @@ from locale import strcoll
 from category import Category
 from application import Application
 
+## Exceptions ##
+class RepositoryConnectionError(Exception):
+    """Exception levée lorsqu'il est impossible de se connecter à un
+       dépôt.
+
+    Attributs:
+        repository : addresse du dépôt
+        error      : erreur ayant déclenché cette exception
+    """
+    def __init__(self, repository, error):
+        self.repository = repository
+        self.error = error
+
+class InvalidRepository(Exception):
+    """Exception levée lorsqu'il est impossible de lire le contenu d'un
+       dépôt.
+
+    Attributs:
+        repository : addresse du dépôt
+        error      : erreur ayant déclenché cette exception
+    """
+    def __init__(self, repository, error):
+        self.repository = repository
+        self.error = error
+
+class NoSuchApplication(Exception):
+    """Exception levée lorsque l'application recherchée n'existe pas.
+
+    Attributs:
+        id         : id de l'application
+        branch     : branche de l'application
+        repository : dépôt de l'application
+    """
+    def __init__(self, id, branch, repository):
+        self.id = id
+        self.branch = branch
+        self.repository = repository
+
+## Fonctions ##
 def cmp_version(a,b):
     """Compare deux chaînes représentant une version."""
     return -cmp(version.LooseVersion(a), version.LooseVersion(b))
@@ -63,17 +102,17 @@ def get_repository_cfg(uri):
     # Téléchargement du dépôt
     try:
         tmp = urllib2.urlopen(uri + '/repository.ini').read()
-    except (urllib2.URLError, urllib2.HTTPError):
+    except (urllib2.URLError, urllib2.HTTPError) as e:
         logger.warning(u'Impossible de se connecter au dépôt %s' % uri)
-        raise Exception('Impossible de se connecter au dépôt %s' % uri)
+        raise RepositoryConnectionError(uri, e)
         
     # Lecture du dépôt
     cfg = ConfigParser()
     try:
         cfg.read_string(tmp.decode('utf-8'))
-    except:
+    except Exception as e:
         logger.warning(u'Le dépôt %s est invalide' % uri)
-        raise Exception('Le dépôt %s est invalide' % uri)
+        raise InvalidRepository(uri, e)
     
     return cfg
 
@@ -110,10 +149,7 @@ class database():
             self.curseur.execute("CREATE TABLE repositories ("
                 "uri TEXT PRIMARY KEY UNIQUE,"
                 "hash TEXT DEFAULT '',"
-                "show_recommendations BOOL DEFAULT 1,"
-                "show_stable BOOL DEFAULT 1,"
-                "show_unstable BOOL DEFAULT 1,"
-                "show_testing BOOL DEFAULT 1)")
+                "show_recommendations BOOL DEFAULT 1)")
             
             # Recommendations
             self.curseur.execute("CREATE TABLE recommendations ("
@@ -178,6 +214,9 @@ class database():
             logger.debug(u"Ajout de la configuration par défaut.")
             self.set_config('rootpath', '..')#'..\..\..\..')
             self.set_config('version', '0.3 alpha 1')
+            self.set_config('show_stable', True)
+            self.set_config('show_unstable', True)
+            self.set_config('show_testing', True)
             
             # Exécution
             self.connection.commit()
@@ -284,8 +323,8 @@ class database():
         """Renvoie : l'application correspondante"""
         return Application(self, self.get_application_infos(id, branch, repository))
     
-    def get_application_infos(self, id, branch=None, repository=None):
-        """Renvoie : les informatons de l'application correspondante"""
+    def get_application_infos(self, id, branch=None, repository=None, shown=False):
+        """Renvoie : les informations de l'application correspondante"""
         if branch == None:
             if repository == None:
                 apps = self.query("SELECT * FROM applications WHERE id = ?"
@@ -294,15 +333,24 @@ class database():
                 apps = self.query("SELECT * FROM applications WHERE id = ? "
                                   "AND repository = ? "
                                   "ORDER BY version COLLATE desc_versions", (id, repository))
-            
-            version = apps[0]['version']
             try:
-                return dict([i for i in apps if i['branch'] == "Stable" and i['version'] == version][0])
+                version = apps[0]['version']
             except IndexError:
-                try:
-                    return dict([i for i in apps if i['branch'] == "Unstable" and i['version'] == version][0])
-                except IndexError:
-                    return dict(apps[0])
+                logger.error("L'application (id = %s, branch = %s, repository = %s) n'existe pas." % (id, str(branch), str(repository)))
+                raise NoSuchApplication(id, branch, repository)
+            
+            stable = [i for i in apps if i['branch'] == "Stable" and i['version'] == version]
+            unstable = [i for i in apps if i['branch'] == "Unstable" and i['version'] == version]
+            testing = [i for i in apps if i['branch'] == "Testing" and i['version'] == version]
+            
+            if (self.get_config("show_stable") or not shown) and len(stable) > 0:
+                return dict(stable[0])
+            elif (self.get_config("show_unstable") or not shown) and len(unstable) > 0:
+                return dict(unstable[0])
+            elif (self.get_config("show_testing") or not shown) and len(testing) > 0:
+                return dict(testing[0])
+            else:
+                raise NoSuchApplication(id, branch, repository)
         else:
             if repository == None:
                 apps = self.query("SELECT * FROM applications WHERE id = ? "
@@ -313,7 +361,10 @@ class database():
                                   "AND branch = ? "
                                   "AND repository = ? "
                                   "ORDER BY version COLLATE desc_versions", (id, branch, repository))
-            return dict(apps[0])
+            if (self.get_config("show_" + branch.lower(), False) or not shown) and len(apps) > 0:
+                return dict(apps[0])
+            else:
+                raise NoSuchApplication(id, branch, repository)
     
     def get_applications(self, category=''):
         """Renvoie : Les applications que contient la catégorie
@@ -346,7 +397,7 @@ class database():
             return './cache/icons/' + hash + '.png'
         else:
             return None
-    
+
     def get_config(self, name, default=None):
         """Renvoie : La valeur de la propriété name"""
         self.curseur.execute("SELECT * FROM config WHERE name = ?", (name,))
@@ -356,11 +407,14 @@ class database():
         else:
             if value['value'] == None:
                 return default
+            elif value['value'].isdigit():
+                return int(value['value'])
+            elif value['value'].lower() == 'true':
+                return True
+            elif value['value'].lower() == 'false':
+                return False
             else:
-                if value['value'].isdigit():
-                    return int(value['value'])
-                else:
-                    return value['value']
+                return value['value']
     
     def get_depends(self, id, branch, repository):
         """Renvoie : La liste des dépendances de l'application"""
@@ -386,14 +440,17 @@ class database():
         return dict(icons)
 
     def get_installed_application(self, id):
-        cfg = ConfigParser({'Show' : 'True', 'InstallDir' : 'Apps', 'ApplicationRoot' : 'Apps/%s' % id})
-        cfg.read(['./cache/installed/' + id + '/appinfo.ini', './cache/installed/' + id + '/installer.ini'])
-        
-        infos = {}
-        infos['id'] = id
-                
         try:
-            infos['branch'] = cfg.get('Framakey', 'Branch')
+            cfg = ConfigParser({'Show' : 'True', 'InstallDir' : 'Apps', 'ApplicationRoot' : 'Apps/%s' % id})
+            cfg.read(['./cache/installed/' + id + '/appinfo.ini', './cache/installed/' + id + '/installer.ini'])
+            
+            infos = {}
+            infos['id'] = id
+            
+            try:
+                infos['branch'] = cfg.get('Framakey', 'Branch')
+            except NoOptionError:       # Rétrocompatibilité
+                infos['branch'] = cfg.get('Framakey', 'Repository')
             infos['repository'] = None
             infos['category'] = cfg.get('Details', 'Category')
             infos['name'] = cfg.get('Framakey', 'Name')

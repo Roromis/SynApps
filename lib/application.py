@@ -14,6 +14,41 @@ import traceback
 import zipfile
 import shutil
 
+## Exceptions ##
+class ApplicationAlreadyInstalled(Exception):
+    """Exception levée lorsque l'application à installer est déjà
+       installée.
+
+    Attributs:
+        application : Classe application
+    """
+    def __init__(self, application):
+        self.application = application
+
+class PackageDownloadError(Exception):
+    """Exception levée lorsque le paquet ne peut pas être téléchargé.
+
+    Attributs:
+        application : Classe application
+        error       : erreur ayant déclenché cette exception
+    """
+    def __init__(self, application, error):
+        self.application = application
+        self.error = error
+
+class InvalidPackage(Exception):
+    """Exception levée lorsqu'il est impossible de lire le contenu d'un
+       paquet.
+
+    Attributs:
+        application : Classe application
+        error       : erreur ayant déclenché cette exception
+    """
+    def __init__(self, application, error):
+        self.application = application
+        self.error = error
+
+## Fonctions ##
 def zipextractall(zip, path=None, callback=None, members=None, pwd=None, exclude=[]):
 	"""Extract all members from the archive to the current working
 	   directory. `path' specifies a different directory to extract to.
@@ -105,7 +140,10 @@ class Application(object):
             infos = {}
             
             try:
-                infos['branch'] = cfg.get('Framakey', 'Repository')     # À modifier dans les appinfo.ini
+                try:
+                    infos['branch'] = cfg.get('Framakey', 'Branch')
+                except NoOptionError:       # Rétrocompatibilité
+                    infos['branch'] = cfg.get('Framakey', 'Repository')
                 infos['version'] = version.LooseVersion(cfg.get('Version', 'PackageVersion'))
             except (NoSectionError, NoOptionError):
                 return None
@@ -172,7 +210,7 @@ class Application(object):
         """Installe l'application"""
         if self.is_installed():
             logger.warning(u"L'application %s est déjà installée" % self.id)
-            raise Exception
+            raise ApplicationAlreadyInstalled(self)
         else:
             logger.info(u"Installation du paquet %s." % self.id)
             
@@ -188,9 +226,9 @@ class Application(object):
                 logger.debug(u"Téléchargement du paquet.")
                 try:
                     urllib.urlretrieve(self.uri, filename, lambda c,b,t: callback(current_step*100/steps + 100*c*b/(t*steps), "Téléchargement du paquet", *args, **kwargs))
-                except (urllib2.URLError, urllib2.HTTPError):
+                except (urllib2.URLError, urllib2.HTTPError) as e:
                     logger.error(u"Erreur lors du téléchargement:\n" + u''.join(traceback.format_exc()))
-                    raise
+                    raise PackageDownloadError(self, e)
                 current_step += 1
                 
             logger.debug(u"Extraction du paquet.")
@@ -199,9 +237,9 @@ class Application(object):
                 zipextractall(filename,
                         os.path.join(self.database.get_config('rootpath'), install_dir),
                         lambda c,t: callback(current_step*100/steps + 100*c/(t*steps), "Extraction du paquet", *args, **kwargs))
-            except:
+            except Exception as e:
                 logger.error(u"Le paquet %s est invalide:\n" % self.id + u''.join(traceback.format_exc()))
-                raise
+                raise InvalidPackage(self, e)
             
             logger.debug(u"Suppression du paquet.")
             os.remove(filename)
@@ -217,9 +255,9 @@ class Application(object):
     def get_installation_dirs(self, filename):
         try:
             package = zipfile.ZipFile(filename, 'r')
-        except:
+        except Exception as e:
             logger.error("Le paquet %s n'est pas une archive zip." % self.id)
-            raise
+            raise InvalidPackage(self, e)
         
         try:
             inifile = package.read(self.id + '/App/AppInfo/installer.ini')
