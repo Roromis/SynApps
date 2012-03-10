@@ -10,6 +10,41 @@ from configparser import ConfigParser, NoSectionError, NoOptionError
 import urllib, urllib2
 import json
 from distutils import version
+import traceback
+import zipfile
+import shutil
+
+def zipextractall(zip, path=None, callback=None, members=None, pwd=None, exclude=[]):
+	"""Extract all members from the archive to the current working
+	   directory. `path' specifies a different directory to extract to.
+	   `members' is optional and must be a subset of the list returned
+	   by namelist().
+	"""
+	zip = zipfile.ZipFile(zip, 'r')
+	
+	if callback is None:
+		def callback(currentsize, totalsize):
+			return None
+	
+	if members is None:
+		members = zip.namelist()
+	
+	for i in exclude:
+		for j in members:
+			if os.path.normpath(j).startswith(i):
+				members.remove(j)
+	
+	zipsize = 0
+	for infos in zip.infolist():
+		zipsize += infos.file_size
+	dirsize = 0
+	
+	for zipinfo in members:
+		zip.extract(zipinfo, path, pwd)
+		dirsize += zip.getinfo(zipinfo).file_size
+		callback(dirsize, zipsize)
+
+	zip.close()
 
 class Application(object):
     branches = {
@@ -133,6 +168,78 @@ class Application(object):
         
         return self.screenshots
     
+    def install(self, callback, *args, **kwargs):
+        """Installe l'application"""
+        if self.is_installed():
+            logger.warning(u"L'application %s est déjà installée" % self.id)
+            raise Exception
+        else:
+            logger.info(u"Installation du paquet %s." % self.id)
+            
+            current_step = 0
+            if os.path.isfile(self.uri):
+                # Le paquet est un fichier local
+                filename = self.uri
+                steps = 1
+            else:
+                steps = 2
+                filename = './cache/packages/' + self.id + '.fmk.zip'
+                
+                logger.debug(u"Téléchargement du paquet.")
+                try:
+                    urllib.urlretrieve(self.uri, filename, lambda c,b,t: callback(current_step*100/steps + 100*c*b/(t*steps), "Téléchargement du paquet", *args, **kwargs))
+                except (urllib2.URLError, urllib2.HTTPError):
+                    logger.error(u"Erreur lors du téléchargement:\n" + u''.join(traceback.format_exc()))
+                    raise
+                current_step += 1
+                
+            logger.debug(u"Extraction du paquet.")
+            try:
+                application_root, install_dir = self.get_installation_dirs(filename)
+                zipextractall(filename,
+                        os.path.join(self.database.get_config('rootpath'), install_dir),
+                        lambda c,t: callback(current_step*100/steps + 100*c/(t*steps), "Extraction du paquet", *args, **kwargs))
+            except:
+                logger.error(u"Le paquet %s est invalide:\n" % self.id + u''.join(traceback.format_exc()))
+                raise
+            
+            logger.debug(u"Suppression du paquet.")
+            os.remove(filename)
+                
+            logger.debug(u"Copie des informations dans le cache.")
+            cache = os.path.join('./cache/installed/', self.id)
+            appinfo = os.path.join(self.database.get_config("rootpath"), application_root, 'App', 'AppInfo')
+            os.mkdir(cache)
+            if os.path.isdir(appinfo):
+                for i in os.listdir(appinfo):
+                    shutil.copy(os.path.join(appinfo, i), cache)
+    
+    def get_installation_dirs(self, filename):
+        try:
+            package = zipfile.ZipFile(filename, 'r')
+        except:
+            logger.error("Le paquet %s n'est pas une archive zip." % self.id)
+            raise
+        
+        try:
+            inifile = package.read(self.id + '/App/AppInfo/installer.ini')
+            cfg = ConfigParser()
+            cfg.read_string(inifile.decode('utf-8'))
+        except KeyError:
+            return os.path.join('Apps', self.id), 'Apps'
+        
+        try:
+            install_dir = cfg.get('Framakey', 'InstallDir')
+        except (NoOptionError, NoSectionError):
+            install_dir = 'Apps'
+        
+        try:
+            application_root = cfg.get('Framakey', 'InstallDir')
+        except (NoOptionError, NoSectionError):
+            application_root = os.path.join('Apps', self.id)
+        
+        return application_root, install_dir
+        
     def is_installed(self):
         """Renvoie : True si l'application est installée, False sinon."""
         return os.path.isdir('./cache/installed/' + self.id)

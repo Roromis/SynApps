@@ -64,6 +64,8 @@ def main():
         os.mkdir('./cache/icons')
     if not os.path.isdir('./cache/installed'):
         os.mkdir('./cache/installed')
+    if not os.path.isdir('./cache/packages'):
+        os.mkdir('./cache/packages')
     
     db = database()
     #logger.debug(u"Version : %s" % db.get_config("version"))

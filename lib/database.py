@@ -63,7 +63,7 @@ def get_repository_cfg(uri):
     # Téléchargement du dépôt
     try:
         tmp = urllib2.urlopen(uri + '/repository.ini').read()
-    except:
+    except (urllib2.URLError, urllib2.HTTPError):
         logger.warning(u'Impossible de se connecter au dépôt %s' % uri)
         raise Exception('Impossible de se connecter au dépôt %s' % uri)
         
@@ -347,22 +347,20 @@ class database():
         else:
             return None
     
-    def get_config(self, name=None, default=None):      # À modifier (cfg)
-		if name == None:
-			return self.query("SELECT * FROM config")
-		else:
-			self.curseur.execute("SELECT * FROM config WHERE name = ?", (name,))
-			value = self.curseur.fetchone()
-			if value == None:
-				return default
-			else:
-				if value['value'] == None:
-					return default
-				else:
-					if value['value'].isdigit():
-						return int(value['value'])
-					else:
-						return value['value']
+    def get_config(self, name, default=None):
+        """Renvoie : La valeur de la propriété name"""
+        self.curseur.execute("SELECT * FROM config WHERE name = ?", (name,))
+        value = self.curseur.fetchone()
+        if value == None:
+            return default
+        else:
+            if value['value'] == None:
+                return default
+            else:
+                if value['value'].isdigit():
+                    return int(value['value'])
+                else:
+                    return value['value']
     
     def get_depends(self, id, branch, repository):
         """Renvoie : La liste des dépendances de l'application"""
@@ -482,7 +480,8 @@ class database():
             if not self.icon_used(filename[:-4]):
                 os.remove("./cache/icons/" + filename)
         
-    def set_config(self, name, value):      # À modifier (cfg)
+    def set_config(self, name, value):
+        """Modifie la valeur de la propriété name"""
         self.curseur.execute("SELECT * FROM config WHERE name = ?", (name,))
         if self.curseur.fetchone() == None:
             self.execute("INSERT INTO config (name, value) VALUES (?, ?)", (name, str(value)))
@@ -490,6 +489,7 @@ class database():
             self.execute("UPDATE config SET value = ? WHERE name = ?", (str(value), name))
     
     def set_rating(self, id, branch, repository, rating, votes):
+        """Modifie l'évaluation de l'application"""
         self.execute("UPDATE applications SET rating = ?, votes = ? "
                      "WHERE id = ? AND branch = ? AND repository = ?",
                      (rating, votes, id, branch, repository))
@@ -502,7 +502,11 @@ class database():
         """Met à jour la base de donnée"""
         logger.info(u"Mise à jour des dépôts.")
         for repository in self.get_repositories():
-            new_hash = urllib2.urlopen(repository['uri'] + '/repository.ini.hash').read()
+            try:
+                new_hash = urllib2.urlopen(repository['uri'] + '/repository.ini.hash').read()
+            except (urllib2.URLError, urllib2.HTTPError):
+                new_hash = None
+            
             if repository['hash'] == new_hash and not force:
                 logger.debug(u"Le dépôt %s n'a pas été modifié." % repository['uri'])
             else:
