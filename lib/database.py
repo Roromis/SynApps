@@ -175,7 +175,8 @@ class database():
 
             # Ajout de la configuration par défaut
             logger.debug(u"Ajout de la configuration par défaut.")
-            self.set_config('rootpath', '..')#'..\..\..\..')
+            self.set_config('rootpath', '../../Scripts/Framakey')#'..\..\..\..')
+            self.set_config('tmppath', './cache/packages')
             self.set_config('version', '0.3 alpha 1')
             self.set_config('show_stable', True)
             self.set_config('show_unstable', True)

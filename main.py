@@ -68,7 +68,7 @@ def main():
         os.mkdir('./cache/packages')
     
     db = database()
-    #logger.debug(u"Version : %s" % db.get_config("version"))
+    logger.debug(u"Version : %s" % db.get_config("version"))
     db.update(force=True)
     
     return 0

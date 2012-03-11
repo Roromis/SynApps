@@ -13,9 +13,19 @@ from distutils import version
 import traceback
 import zipfile
 import shutil
-from dependencytree import DependencyTree
+import platform
 
+from dependencytree import DependencyTree
 from exceptions import *
+
+def get_free_space(folder):
+    if platform.system() == 'Windows':
+        free_bytes = ctypes.c_ulonglong(0)
+        ctypes.windll.kernel32.GetDiskFreeSpaceExW(ctypes.c_wchar_p(folder), None, None, ctypes.pointer(free_bytes))
+        return free_bytes.value
+    else:
+        s = os.statvfs(folder)
+        return s.f_bsize * s.f_bavail
 
 def zipextractall(zip, path=None, callback=None, members=None, pwd=None, exclude=[]):
 	"""Extract all members from the archive to the current working
@@ -26,8 +36,7 @@ def zipextractall(zip, path=None, callback=None, members=None, pwd=None, exclude
 	zip = zipfile.ZipFile(zip, 'r')
 	
 	if callback is None:
-		def callback(currentsize, totalsize):
-			return None
+		callback = lambda a,b : None
 	
 	if members is None:
 		members = zip.namelist()
@@ -78,6 +87,49 @@ class Application(object):
 
     def __getattr__(self, name):
         return self.infos[name]
+    
+    def _install(self, callback, *args, **kwargs):
+        """Installe l'application (sans dépendances, sans vérifications)"""
+        if not self.is_installed():
+            logger.info(u"Installation du paquet %s." % self.id)
+            
+            current_step = 0
+            if os.path.isfile(self.uri):
+                # Le paquet est un fichier local
+                filename = self.uri
+                steps = 1
+            else:
+                steps = 2
+                filename = './cache/packages/' + self.id + '.fmk.zip'
+                
+                logger.debug(u"Téléchargement du paquet.")
+                try:
+                    urllib.urlretrieve(self.uri, filename, lambda c,b,t: callback(current_step*100/steps + 100*c*b/(t*steps), "Téléchargement du paquet", *args, **kwargs))
+                except (urllib2.URLError, urllib2.HTTPError) as e:
+                    logger.error(u"Erreur lors du téléchargement:\n" + u''.join(traceback.format_exc()))
+                    raise PackageDownloadError(self, e)
+                current_step += 1
+                
+            logger.debug(u"Extraction du paquet.")
+            try:
+                application_root, install_dir = self.get_installation_dirs(filename)
+                zipextractall(filename,
+                        os.path.join(self.database.get_config('rootpath'), install_dir),
+                        lambda c,t: callback(current_step*100/steps + 100*c/(t*steps), "Extraction du paquet", *args, **kwargs))
+            except Exception as e:
+                logger.error(u"Le paquet %s est invalide:\n" % self.id + u''.join(traceback.format_exc()))
+                raise InvalidPackage(self, e)
+            
+            logger.debug(u"Suppression du paquet.")
+            os.remove(filename)
+                
+            logger.debug(u"Copie des informations dans le cache.")
+            cache = os.path.join('./cache/installed/', self.id)
+            appinfo = os.path.join(self.database.get_config("rootpath"), application_root, 'App', 'AppInfo')
+            os.mkdir(cache)
+            if os.path.isdir(appinfo):
+                for i in os.listdir(appinfo):
+                    shutil.copy(os.path.join(appinfo, i), cache)
     
     def check_size(self, dependency_tree):
         """Renvoie : True si il y a assez de place pour installer
@@ -206,51 +258,18 @@ class Application(object):
         
         return self.screenshots
     
-    def install(self, callback, *args, **kwargs):
+    def install(self, callback=None, *args, **kwargs):
         """Installe l'application"""
         if self.is_installed():
             logger.warning(u"L'application %s est déjà installée" % self.id)
             raise ApplicationAlreadyInstalled(self)
         
-        logger.info(u"Installation du paquet %s." % self.id)
+        if callback == None:
+            callback = lambda a,b : None
         
-        current_step = 0
-        if os.path.isfile(self.uri):
-            # Le paquet est un fichier local
-            filename = self.uri
-            steps = 1
-        else:
-            steps = 2
-            filename = './cache/packages/' + self.id + '.fmk.zip'
-            
-            logger.debug(u"Téléchargement du paquet.")
-            try:
-                urllib.urlretrieve(self.uri, filename, lambda c,b,t: callback(current_step*100/steps + 100*c*b/(t*steps), "Téléchargement du paquet", *args, **kwargs))
-            except (urllib2.URLError, urllib2.HTTPError) as e:
-                logger.error(u"Erreur lors du téléchargement:\n" + u''.join(traceback.format_exc()))
-                raise PackageDownloadError(self, e)
-            current_step += 1
-            
-        logger.debug(u"Extraction du paquet.")
-        try:
-            application_root, install_dir = self.get_installation_dirs(filename)
-            zipextractall(filename,
-                    os.path.join(self.database.get_config('rootpath'), install_dir),
-                    lambda c,t: callback(current_step*100/steps + 100*c/(t*steps), "Extraction du paquet", *args, **kwargs))
-        except Exception as e:
-            logger.error(u"Le paquet %s est invalide:\n" % self.id + u''.join(traceback.format_exc()))
-            raise InvalidPackage(self, e)
-        
-        logger.debug(u"Suppression du paquet.")
-        os.remove(filename)
-            
-        logger.debug(u"Copie des informations dans le cache.")
-        cache = os.path.join('./cache/installed/', self.id)
-        appinfo = os.path.join(self.database.get_config("rootpath"), application_root, 'App', 'AppInfo')
-        os.mkdir(cache)
-        if os.path.isdir(appinfo):
-            for i in os.listdir(appinfo):
-                shutil.copy(os.path.join(appinfo, i), cache)
+        dependency_tree = self.get_dependency_tree()
+        self.check_size(dependency_tree)
+        dependency_tree.install(callback, *args, **kwargs)
     
     def get_installation_dirs(self, filename):
         try:
