@@ -14,41 +14,8 @@ import traceback
 import zipfile
 import shutil
 
-## Exceptions ##
-class ApplicationAlreadyInstalled(Exception):
-    """Exception levée lorsque l'application à installer est déjà
-       installée.
+from exceptions import *
 
-    Attributs:
-        application : Classe application
-    """
-    def __init__(self, application):
-        self.application = application
-
-class PackageDownloadError(Exception):
-    """Exception levée lorsque le paquet ne peut pas être téléchargé.
-
-    Attributs:
-        application : Classe application
-        error       : erreur ayant déclenché cette exception
-    """
-    def __init__(self, application, error):
-        self.application = application
-        self.error = error
-
-class InvalidPackage(Exception):
-    """Exception levée lorsqu'il est impossible de lire le contenu d'un
-       paquet.
-
-    Attributs:
-        application : Classe application
-        error       : erreur ayant déclenché cette exception
-    """
-    def __init__(self, application, error):
-        self.application = application
-        self.error = error
-
-## Fonctions ##
 def zipextractall(zip, path=None, callback=None, members=None, pwd=None, exclude=[]):
 	"""Extract all members from the archive to the current working
 	   directory. `path' specifies a different directory to extract to.

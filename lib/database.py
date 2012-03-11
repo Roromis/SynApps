@@ -17,45 +17,8 @@ from locale import strcoll
 from category import Category
 from application import Application
 
-## Exceptions ##
-class RepositoryConnectionError(Exception):
-    """Exception levée lorsqu'il est impossible de se connecter à un
-       dépôt.
+from exceptions import *
 
-    Attributs:
-        repository : addresse du dépôt
-        error      : erreur ayant déclenché cette exception
-    """
-    def __init__(self, repository, error):
-        self.repository = repository
-        self.error = error
-
-class InvalidRepository(Exception):
-    """Exception levée lorsqu'il est impossible de lire le contenu d'un
-       dépôt.
-
-    Attributs:
-        repository : addresse du dépôt
-        error      : erreur ayant déclenché cette exception
-    """
-    def __init__(self, repository, error):
-        self.repository = repository
-        self.error = error
-
-class NoSuchApplication(Exception):
-    """Exception levée lorsque l'application recherchée n'existe pas.
-
-    Attributs:
-        id         : id de l'application
-        branch     : branche de l'application
-        repository : dépôt de l'application
-    """
-    def __init__(self, id, branch, repository):
-        self.id = id
-        self.branch = branch
-        self.repository = repository
-
-## Fonctions ##
 def cmp_version(a,b):
     """Compare deux chaînes représentant une version."""
     return -cmp(version.LooseVersion(a), version.LooseVersion(b))
