@@ -560,7 +560,7 @@ class database():
                             
                             i = 1
                             while cfg.has_option(section, 'depend%d'%i):
-                                self.add_depend(id, branch, repository['uri'], cfg.get(section, 'depend'%i))
+                                self.add_depend(id, branch, repository['uri'], cfg.get(section, 'depend%d'%i))
                                 i += 1
                             
                             for size in [32,48,64,128]:
