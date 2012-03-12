@@ -63,9 +63,10 @@ class DependencyTree(object):
         else:
             return depends, 0, 0
     
-    def install(self, callback, *args, **kwargs):
+    def install(self, callback, is_depend=False, *args, **kwargs):
         """Installe les dépendances, puis la racine (parcours postfixe)"""
-        for child in self.children:
-            child.install(callback, *args, **kwargs)
         
-        self.root._install(callback, *args, **kwargs)
+        for child in self.children:
+            child.install(callback, is_depend=True, *args, **kwargs)
+        
+        self.root._install(callback, is_depend=is_depend, *args, **kwargs)

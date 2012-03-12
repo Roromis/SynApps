@@ -88,7 +88,7 @@ class Application(object):
     def __getattr__(self, name):
         return self.infos[name]
     
-    def _install(self, callback, *args, **kwargs):
+    def _install(self, callback, is_depend, *args, **kwargs):
         """Installe l'application (sans dépendances, sans vérifications)"""
         if not self.is_installed():
             logger.info(u"Installation du paquet %s." % self.id)
@@ -126,6 +126,24 @@ class Application(object):
             logger.debug(u"Copie des informations dans le cache.")
             cache = os.path.join('./cache/installed/', self.id)
             appinfo = os.path.join(self.database.get_config("rootpath"), application_root, 'App', 'AppInfo')
+            
+            # Modification du fichier installer.ini
+            cfg = ConfigParser()
+            cfg.optionxform = str   # Pour conserver la casse
+            cfg.read(os.path.join(appinfo, "installer.ini"))
+            
+            if not cfg.has_section("Framakey"):
+                cfg.add_section("Framakey")
+            
+            if is_depend:
+                cfg.set("Framakey", "InstalledAs", "depend")
+            else:
+                cfg.set("Framakey", "InstalledAs", "explicit")
+            
+            with open(os.path.join(appinfo, "installer.ini"), "w") as f:
+                cfg.write(f)
+            
+            # Copie dans le cache
             os.mkdir(cache)
             if os.path.isdir(appinfo):
                 for i in os.listdir(appinfo):
@@ -269,7 +287,7 @@ class Application(object):
         
         dependency_tree = self.get_dependency_tree()
         self.check_size(dependency_tree)
-        dependency_tree.install(callback, *args, **kwargs)
+        dependency_tree.install(callback, False, *args, **kwargs)
     
     def get_installation_dirs(self, filename):
         try:
