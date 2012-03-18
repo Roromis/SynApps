@@ -16,6 +16,7 @@ from locale import strcoll
 
 from category import Category
 from application import Application
+from operationsqueue import OperationsQueue
 
 from exceptions import *
 
@@ -196,12 +197,35 @@ class database():
         # Tri
         self.connection.create_collation("unicode", strcoll)
         self.connection.create_collation("desc_versions", cmp_version)
-    
+        
+        # Queue des opérations
+        self.operations_queue = OperationsQueue()
+        
     def add_application(self, id, branch, repository, category, name,
                         friendly_name, short_description,
                         long_description, size_c, size_u, version,
                         license, author, show, uri):
-        """Ajoute une application"""
+        """
+            Ajoute une application
+            
+            Arguments :
+                id : Identifiant de l'application
+                branch : Brance ('Stable', 'Unstable' ou 'Testing')
+                repository : Adresse du dépôt
+                category : Catégorie (categorie/sous categorie/...)
+                name : Nom de l'application
+                friendly_name : Description courte (quelques mots)
+                short_description : Description courte (une phrase)
+                long_description : Description longue
+                size_c : Taille compressé
+                size_u : Taille décompressé
+                version : Version (chaine de caractères)
+                license : License
+                author : Mainteneur du paquet
+                show : True si le paquet doit être affiché dans l'interface
+                       False sinon
+                uri : adresse du paque
+        """
         self.curseur.execute("INSERT INTO applications (id, branch, repository, "
                 "category, name, friendly_name, short_description, "
                 "long_description, size_c, size_u, version, "
@@ -213,9 +237,19 @@ class database():
                 license, author, show, uri))
     
     def add_category(self, id, icon_uri, newhash, cfg):
-        """Ajoute une catégorie ou la modifie si elle existe"""
+        """
+            Ajoute une catégorie ou la modifie si elle existe
+            
+            Arguments :
+                id : Identifiant de la catégorie
+                icon_uri : Adresse de l'icône
+                newhash : Somme md5 de la nouvelle icône
+                cfg : Objet ConfigParser associé au fichier de configuration du
+                      dépôt
+        """
         hash = self.get_category_hash(id)
         if hash != newhash:
+            # Le hash a changé
             if not os.path.isfile('./cache/icons/' + newhash + '.png'):
                 try:
                     with open('./cache/icons/' + newhash + '.png', 'wb') as f:
@@ -224,6 +258,7 @@ class database():
                     logger.warning(u"Impossible de télécharger l'icône %s." % icon_uri)
             
             if hash == None:
+                # La catégorie n'existe pas
                 self.curseur.execute("INSERT INTO categories (id, hash) "
                         "VALUES (?, ?)", (id, newhash))
                 # On ajoute les parents de la catégorie
@@ -233,12 +268,30 @@ class database():
                         "WHERE id = ?", (newhash, id))
     
     def add_depend(self, id, branch, repository, depend):
-        """Ajoute une dépendance"""
+        """
+            Ajoute une dépendance
+        
+            Arguments :
+                id : Identifiant de l'application
+                branch : Branche de l'application
+                repository : Dépôt de l'application
+                depend : Identifiant de la dépendance
+        """
         self.curseur.execute("INSERT INTO depends (application, branch, repository, depend) "
                 "VALUES (?, ?, ?, ?)", (id, branch, repository, depend))
     
     def add_icon(self, id, branch, repository, size, uri, hash):
-        """Ajoute une icône"""
+        """
+            Ajoute une icône d'une application
+            
+            Arguments :
+                id : Identifiant de l'application
+                branch : Branche de l'application
+                repository : Dépôt de l'application
+                size : Taille de l'icône
+                uri : Adresse de l'icône
+                hash : Somme md5 de l'icône
+        """
         self.curseur.execute("INSERT INTO icons (application, branch, repository, size, hash) "
                 "VALUES (?,?,?,?,?)", (id, branch, repository, size, hash))
         
@@ -250,45 +303,90 @@ class database():
                 logger.warning(u"Impossible de télécharger l'icône %s." % uri)
     
     def add_link(self, id, branch, repository, title, uri):
-        """Ajoute un lien"""
+        """
+            Ajoute un lien
+            
+            Arguments :
+                id : Identifiant de l'application
+                branch : Branche de l'application
+                repository : Dépôt de l'application
+                title : Titre du lien
+                uri : Adresse du lien
+        """
         self.curseur.execute("INSERT INTO links (application, branch, repository, title, uri) "
                 "VALUES (?, ?, ?, ?, ?)", (id, branch, repository, title, uri))
     
     def add_recommendation(self, repository, recommendation):
-        """Ajoute une recommendation"""
+        """
+            Ajoute une recommendation
+            
+            Arguments :
+                repository : Adresse du Dépôt
+                recommendation : Identificant de l'application recommendée
+        """
         self.curseur.execute("INSERT INTO recommendations (repository, application) "
                 "VALUES (?, ?)", (repository, recommendation))
     
     def add_repository(self, uri):
-        """Ajoute un dépôt"""
+        """
+            Ajoute un dépôt
+            
+            Arguments :
+                uri : Adresse du Dépôt
+        """
         self.execute("INSERT INTO repositories (uri) VALUES (?)", (uri,))
     
     def application_exists(self, id):
-        """Renvoie : True si l'application est dans la base de donnée,
-                     False sinon"""
+        """
+            Renvoie :
+                True si l'application est dans la base de donnée
+                False sinon
+        """
         return self.query("SELECT count(id) FROM applications WHERE id = ?", (id,))[0][0] > 0
     
     def count_applications(self, category):
-        """Renvoie : Le nombre d'applications que contient la catégorie
-                     (et ses sous catégories)"""
+        """
+            Renvoie : Le nombre d'applications que contient la catégorie (et ses
+                      sous catégories)
+        """
         return self.query("SELECT count(id) FROM applications "
                 "WHERE category LIKE ?", (category + "%",))[0][0]
         
     def execute(self, query, data=()):
-        """Éxecute une commande SQL nécessitant un "commit" (insertion,
-           suppression, création de table...)
-           Renvoie : l'id de la dernière ligne insérée"""
+        """
+            Éxecute une commande SQL nécessitant un "commit" (insertion,
+            suppression, création de table...)
+            
+            Renvoie : l'id de la dernière ligne insérée
+        """
         self.curseur.execute(query, data)
         self.connection.commit()
         
         return self.curseur.lastrowid
     
     def get_application(self, id, branch=None, repository=None):
-        """Renvoie : l'application correspondante"""
+        """
+            Arguments :
+                id : Identifiant de l'application
+                branch : Branche de l'application (facultatif)
+                repository : Dépôt de l'application (facultatif)
+            
+            Renvoie : l'application correspondante
+        """
         return Application(self, self.get_application_infos(id, branch, repository))
     
     def get_application_infos(self, id, branch=None, repository=None, shown=False):
-        """Renvoie : les informations de l'application correspondante"""
+        """
+            Arguments :
+                id : Identifiant de l'application
+                branch : Branche de l'application (facultatif)
+                repository : Dépôt de l'application (facultatif)
+                shown :
+                    True si l'application est visible
+                    False sinon
+            
+            Renvoie : Les informations de l'application correspondante
+        """
         if branch == None:
             if repository == None:
                 apps = self.query("SELECT * FROM applications WHERE id = ?"
@@ -331,8 +429,14 @@ class database():
                 raise NoSuchApplication(id, branch, repository)
     
     def get_applications(self, category=''):
-        """Renvoie : Les applications que contient la catégorie
-                     (et ses sous catégories)"""
+        """
+            Arguments :
+                category : Identifiant de la Catégorie (facultatif)
+            
+            Renvoie :
+                Les applications que contient la catégorie (et ses sous
+                catégories)
+        """
         applications = self.query("SELECT * FROM applications "
                 "WHERE category LIKE ?", (category + "%",))
         return [Application(self, dict(i)) for i in applications]
@@ -343,11 +447,21 @@ class database():
         return map(lambda (a,):self.get_category(a), categories)
     
     def get_category(self, id):
-        """Renvoie : La catégorie correspondante"""
+        """
+            Argument :
+                id : Identificant de la catégorie
+            
+            Renvoie : La catégorie correspondante
+        """
         return Category(self, id)
     
     def get_category_hash(self, id):
-        """Renvoie : la somme md5 de l'icône de la catégorie"""
+        """
+            Argument :
+                id : Identificant de la catégorie
+            
+            Renvoie : La somme md5 de l'icône de la catégorie
+        """
         try:
             return self.query("SELECT hash FROM categories "
                     "WHERE id = ?", (id,))[0][0]
@@ -355,7 +469,12 @@ class database():
             return None
     
     def get_category_icon(self, id):
-        """Renvoie : L'icône de la catégorie"""
+        """
+            Argument :
+                id : Identificant de la catégorie
+            
+            Renvoie : L'icône de la catégorie
+        """
         hash = self.get_category_hash(id)
         if hash:
             return './cache/icons/' + hash + '.png'
@@ -363,7 +482,15 @@ class database():
             return None
 
     def get_config(self, name, default=None):
-        """Renvoie : La valeur de la propriété name"""
+        """
+            Arguments :
+                name : Nom de la propriété
+                default : Valeur par défaut (None par défaut)
+            
+            Renvoie :
+                La valeur de la propriété si elle existe
+                La valeur par défaut sinon
+        """
         self.curseur.execute("SELECT * FROM config WHERE name = ?", (name,))
         value = self.curseur.fetchone()
         if value == None:
@@ -381,14 +508,31 @@ class database():
                 return value['value']
     
     def get_depends(self, id, branch, repository):
-        """Renvoie : La liste des dépendances de l'application"""
+        """
+            Arguments :
+                id : Identifiant de l'application
+                branch : Branche de l'application
+                repository : Dépôt de l'application
+            
+            Renvoie : La liste des dépendances de l'application
+        """
         depends = self.query("SELECT depend FROM depends WHERE application = ? "
                     "AND branch = ? AND repository = ?",
                     (id, branch, repository))
         return map(lambda (a,):a, depends)
     
     def get_icon_hash(self, id, branch, repository, size):
-        """Renvoie : la somme md5 de l'icône de l'application"""
+        """
+            Arguments :
+                id : Identifiant de l'application
+                branch : Branche de l'application
+                repository : Dépôt de l'application
+                size : Taille de l'icône
+            
+            Renvoie :
+                La somme md5 de l'icône si elle existe
+                None sinon
+        """
         try:
             return self.query("SELECT hash FROM icons WHERE application = ? "
                     "AND branch = ? AND repository = ? AND size = ? ",
@@ -397,13 +541,29 @@ class database():
             return None
     
     def get_icons(self, id, branch, repository):
-        """Renvoie : Les icônes de l'application"""
+        """
+            Arguments :
+                id : Identifiant de l'application
+                branch : Branche de l'application
+                repository : Dépôt de l'application
+            
+            Renvoie : Les icônes de l'application
+        """
         icons = self.query("SELECT size, hash FROM icons WHERE application = ? AND branch = ? AND repository = ?",
                     (id, branch, repository))
         icons = map(lambda (a,b):(a,'./cache/icons/'+b+'.png'), icons)
         return dict(icons)
 
     def get_installed_application(self, id):
+        """
+            Arguments :
+                id : Identifiant de l'application
+            
+            Renvoie :
+                Si l'application est correctement installée, les informations
+                    locales
+                Sinon : None
+        """
         try:
             cfg = ConfigParser({'Show' : 'True', 'InstallDir' : 'Apps', 'ApplicationRoot' : 'Apps/%s' % id})
             cfg.read(['./cache/installed/' + id + '/appinfo.ini', './cache/installed/' + id + '/installer.ini'])
@@ -463,12 +623,28 @@ class database():
         return self.query('SELECT uri, hash FROM repositories')
     
     def get_subcategories(self, id=''):
-        """Renvoie : Les sous catégories de la catégorie id"""
+        """
+            Arguments :
+                id : Identifiant de la catégorie
+            
+            Renvoie : Les sous catégories"""
         return [i for i in self.get_categories() if get_category_parent(i) == id]
     
     def icon_used(self, hash):
-        """Renvoie : True si l'icône est utilisée, False sinon."""
-        return self.query('SELECT COUNT(hash) FROM categories WHERE hash = ?', (hash,))[0][0] +  self.query('SELECT COUNT(hash) FROM icons WHERE hash = ?', (hash,))[0][0] > 0
+        """
+            Arguments :
+                hash : Somme md5 d'une icône
+            
+            Renvoie : True si l'icône est utilisée, False sinon.
+        """
+        if self.query('SELECT COUNT(hash) FROM categories WHERE hash = ?', (hash,))[0][0] > 0:
+            # L'icône est utilisée pour une catégorie
+            return True
+        elif self.query('SELECT COUNT(hash) FROM icons WHERE hash = ?', (hash,))[0][0] > 0:
+            # L'icône est utilisée pour une application
+            return True
+        else:
+            return False
     
     def query(self, query, data=()):
         """Éxecute une commande SQL de type "SELECT"
@@ -477,7 +653,12 @@ class database():
         return self.curseur.fetchall()
     
     def remove_all_from_repository(self, uri):
-        """Supprime le contenu d'un dépôt"""
+        """
+            Supprime le contenu d'un dépôt
+            
+            Arguments :
+                uri : Adresse du dépôt
+        """
         self.execute("DELETE FROM applications WHERE repository = ?", (uri,))
         self.execute("DELETE FROM recommendations WHERE repository = ?", (uri,))
         
@@ -486,7 +667,12 @@ class database():
         self.execute("DELETE FROM icons WHERE repository = ?", (uri,))
     
     def remove_category(self, id):
-        """Supprime la catégorie id"""
+        """
+            Supprime une catégorie
+            
+            Arguments :
+                id : Identifiant de la catégorie
+        """
         self.curseur.execute("DELETE FROM categories WHERE id = ?", (id,))
     
     def remove_empty_categories(self):
@@ -500,9 +686,37 @@ class database():
         for filename in os.listdir("./cache/icons"):
             if not self.icon_used(filename[:-4]):
                 os.remove("./cache/icons/" + filename)
-        
+    
+    def remove_uninstalled_applications_infos(self):
+        """
+            Supprime les informations stockées dans le dossier cache/installed
+            sur des applications non installées
+        """
+        for id in os.listdir('./cache/installed'):
+            cfg = ConfigParser({
+                    'Show' : 'True',
+                    'InstallDir' : 'Apps',
+                    'ApplicationRoot' : 'Apps/%s' % id
+                })
+            cfg.add_section("Framakey")
+            cfg.read('./cache/installed/' + id + '/installer.ini')
+            
+            root = os.path.join(self.get_config('rootpath'), 
+                                cfg.get('Framakey', 'ApplicationRoot'))
+            if not os.path.exists(root):
+                # L'application n'est pas présente sur la clé, elle a
+                # probablement été supprimée manuellement
+                logger.debug(u"L'application %s n'est plus installée, suppression des fichiers de cache." % id)
+                shutil.rmtree('./cache/installed/' + id)
+    
     def set_config(self, name, value):
-        """Modifie la valeur de la propriété name"""
+        """
+            Modifie (ou crée) une propriété
+            
+            Arguments :
+                name : Nom de la propriété
+                value : Nouvelle valeur
+        """
         self.curseur.execute("SELECT * FROM config WHERE name = ?", (name,))
         if self.curseur.fetchone() == None:
             self.execute("INSERT INTO config (name, value) VALUES (?, ?)", (name, str(value)))
@@ -510,17 +724,40 @@ class database():
             self.execute("UPDATE config SET value = ? WHERE name = ?", (str(value), name))
     
     def set_rating(self, id, branch, repository, rating, votes):
-        """Modifie l'évaluation de l'application"""
+        """
+            Modifie localement l'évaluation de l'application
+        
+            Arguments :
+                id : Identifiant de l'application
+                branch : Branche de l'application
+                repository : Dépôt de l'application
+                rating : Nouvelle note
+                votes : Nombre de votes
+        """
         self.execute("UPDATE applications SET rating = ?, votes = ? "
                      "WHERE id = ? AND branch = ? AND repository = ?",
                      (rating, votes, id, branch, repository))
     
     def set_repository_hash(self, uri, hash):
-        """Modifie la somme md5 associée à un dépôt"""
+        """
+            Modifie la somme md5 associée à un dépôt
+            
+            Arguments :
+                uri : Adresse du dépôt
+                hash : Nouvelle somme md5
+        """
         self.curseur.execute("UPDATE repositories SET hash = ? WHERE uri = ?", (hash, uri))
     
     def update(self, force=False):
-        """Met à jour la base de donnée"""
+        """
+            Met à jour la base de donnée
+            
+            Arguments :
+                force :
+                    True si la mise à jour est forcée (les dépôts sont mis à
+                        jour qu'ils aient été modifié ou non)
+                    False sinon
+        """
         logger.info(u"Mise à jour des dépôts.")
         for repository in self.get_repositories():
             try:
@@ -575,6 +812,7 @@ class database():
         
         self.remove_empty_categories()
         self.remove_old_icons()
+        self.remove_uninstalled_applications_infos()
         
         self.connection.commit()
         logger.info(u"Fin de la mise à jour des dépôts.")

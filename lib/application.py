@@ -19,6 +19,13 @@ from dependencytree import DependencyTree
 from exceptions import *
 
 def get_free_space(folder):
+    """
+        Arguments :
+            folder : chemin
+        
+        Renvoie :
+            L'espace libre dans le dossier folder en octets
+    """
     if platform.system() == 'Windows':
         free_bytes = ctypes.c_ulonglong(0)
         ctypes.windll.kernel32.GetDiskFreeSpaceExW(ctypes.c_wchar_p(folder), None, None, ctypes.pointer(free_bytes))
@@ -59,6 +66,7 @@ def zipextractall(zip, path=None, callback=None, members=None, pwd=None, exclude
 	zip.close()
 
 class Application(object):
+    """Classe représentant une application."""
     branches = {
                     'Testing' : 0,
                     'Unstable' : 1,
@@ -66,8 +74,38 @@ class Application(object):
                }
     
     def __init__(self, database, infos, depends=None, icons=None):
-        """Initialisation : récupération des icônes et dépendances dans
-           la base de donnée"""
+        """
+            Initialisation : récupération des icônes et dépendances dans la base
+            de donnée
+           
+            Arguments :
+                database : base de donnée des applications
+                infos : dictionnaire contenant les informations de
+                        l'applications
+                    infos['id'] : Identifiant de l'application
+                    infos['branch'] : Brance ('Stable', 'Unstable' ou 'Testing')
+                    infos['repository'] : Adresse du dépôt
+                    infos['category'] : Catégorie (categorie/sous categorie/...)
+                    infos['name'] : Nom de l'application
+                    infos['friendly_name'] : Description courte (quelques mots)
+                    infos['short_description'] : Description courte (une phrase)
+                    infos['long_description'] : Description longue
+                    infos['size_c'] : Taille compressé
+                    infos['size_u'] : Taille décompressé
+                    infos['version'] : Version (chaine de caractères)
+                    infos['license'] : License
+                    infos['author'] : Mainteneur du paquet
+                    infos['show'] : True si le paquet doit être affiché dans
+                                    l'interface, False sinon
+                    infos['uri'] : adresse du paquet
+                    infos['rating'] : Note de l'application
+                    infos['votes'] : Nombre de votes (-2 si les évaluations ne
+                                     sont pas supportées, -1 si elles n'ont pas
+                                     été téléchargées)
+                depends : Liste des identifiants des dépendances directes
+                icons : dictionnaire contenant les icônes
+                    icons[size] : chemin vers l'icône de taille size
+        """
         self.database = database
         self.infos = infos
         self.infos['version'] = version.LooseVersion(self.infos['version'])
@@ -86,10 +124,19 @@ class Application(object):
         self.screenshots = False
 
     def __getattr__(self, name):
+        """
+            Permet de renvoyer l'information name si l'attribut n'existe pas.
+            Par exemple self.description vaut self.infos['description']
+        """
         return self.infos[name]
     
-    def _install(self, callback, is_depend, *args, **kwargs):
-        """Installe l'application (sans dépendances, sans vérifications)"""
+    def _install(self, callback):
+        """
+            Installe l'application (sans dépendances, sans vérifications)
+            
+            Arguments :
+                callback : fonction de signature def callback(progress, message)
+        """
         if not self.is_installed():
             logger.info(u"Installation du paquet %s." % self.id)
             
@@ -104,7 +151,7 @@ class Application(object):
                 
                 logger.debug(u"Téléchargement du paquet.")
                 try:
-                    urllib.urlretrieve(self.uri, filename, lambda c,b,t: callback(current_step*100/steps + 100*c*b/(t*steps), "Téléchargement du paquet", *args, **kwargs))
+                    urllib.urlretrieve(self.uri, filename, lambda c,b,t: callback(current_step*100/steps + 100*c*b/(t*steps), u"Téléchargement du paquet"))
                 except (urllib2.URLError, urllib2.HTTPError) as e:
                     logger.error(u"Erreur lors du téléchargement:\n" + u''.join(traceback.format_exc()))
                     raise PackageDownloadError(self, e)
@@ -115,7 +162,7 @@ class Application(object):
                 application_root, install_dir = self.get_installation_dirs(filename)
                 zipextractall(filename,
                         os.path.join(self.database.get_config('rootpath'), install_dir),
-                        lambda c,t: callback(current_step*100/steps + 100*c/(t*steps), "Extraction du paquet", *args, **kwargs))
+                        lambda c,t: callback(current_step*100/steps + 100*c/(t*steps), u"Extraction du paquet"))
             except Exception as e:
                 logger.error(u"Le paquet %s est invalide:\n" % self.id + u''.join(traceback.format_exc()))
                 raise InvalidPackage(self, e)
@@ -127,31 +174,47 @@ class Application(object):
             cache = os.path.join('./cache/installed/', self.id)
             appinfo = os.path.join(self.database.get_config("rootpath"), application_root, 'App', 'AppInfo')
             
-            # Modification du fichier installer.ini
-            cfg = ConfigParser()
-            cfg.optionxform = str   # Pour conserver la casse
-            cfg.read(os.path.join(appinfo, "installer.ini"))
-            
-            if not cfg.has_section("Framakey"):
-                cfg.add_section("Framakey")
-            
-            if is_depend:
-                cfg.set("Framakey", "InstalledAs", "depend")
-            else:
-                cfg.set("Framakey", "InstalledAs", "explicit")
-            
-            with open(os.path.join(appinfo, "installer.ini"), "w") as f:
-                cfg.write(f)
-            
             # Copie dans le cache
             os.mkdir(cache)
             if os.path.isdir(appinfo):
                 for i in os.listdir(appinfo):
                     shutil.copy(os.path.join(appinfo, i), cache)
+            
+            # Modification du fichier installer.ini
+            self.set_installed_as("depend")
+    
+    def set_installed_as(self, installed_as):
+        """
+            Modifie l'option InstalledAs dans le fichier installer.ini
+            
+            Arguments :
+                installed_as :
+                    'depend' si l'application a été installée en tant que
+                    dépendance, 'explicit' si l'application a été installée
+                    explicitement
+        """
+        filename = os.path.join('./cache/installed/', self.id, 'installer.ini')
+        
+        cfg = ConfigParser()
+        cfg.optionxform = str   # Pour conserver la casse
+        cfg.read(filename)
+        
+        if not cfg.has_section("Framakey"):
+            cfg.add_section("Framakey")
+        
+        cfg.set("Framakey", "InstalledAs", installed_as)
+        
+        with open(filename, "w") as f:
+            cfg.write(f)
     
     def check_size(self, dependency_tree):
-        """Renvoie : True si il y a assez de place pour installer
-           l'application et ses dépendances"""
+        """
+            Lève une exception s'il n'y a pas assez de place pour installer
+            l'application et ses dépendances
+            
+            Arguments :
+                dependency_tree : Arbre des dépendances
+        """
         d, size_c, size_u = dependency_tree.get_size()
         
         rootpath = self.database.get_config("rootpath")
@@ -173,10 +236,18 @@ class Application(object):
                 raise NotEnoughTmpFreeSpace(-remaining_space)
     
     def get_comments(self, limit=10):
-        """Récupère les commentaires
-           Renvoie : d (où d['n'] est le nombre de commentaires et
-                     d['votes'] la liste des commentaires ) si le dépôt
-                     le permet, None sinon"""
+        """
+            Récupère les commentaires
+            
+            Arguments :
+                limit : nombre maximal de commentaires à récupérer
+            
+            Renvoie :
+                Si le dépôt supporte les commentaires : dictionnaire comments
+                    comments['n'] : nombre total de commentaires et
+                    comments['comments'] : liste des commentaires ) si le dépôt
+                Sinon : None
+        """
         if self.repository == None:
             # Application locale non présente dans les dépôts
             return None
@@ -198,11 +269,15 @@ class Application(object):
         return self.comments
     
     def get_dependency_tree(self):
+        """Renvoie l'arbre des dépendances de l'application"""
         return DependencyTree(self.database, self)
     
     def get_installed_version(self):
-        """Renvoie : La version installée, ou None si l'application
-           n'est pas installée"""
+        """Renvoie :
+                Si l'application est installée : dictionnaire infos
+                    infos['branch'] : Branche de l'application installée
+                    infos['version'] : Version de l'application installée
+                Sinon : None"""
         if os.path.isfile('./cache/installed/' + self.id + '/appinfo.ini'):
             cfg = ConfigParser()
             cfg.read('./cache/installed/' + self.id + '/appinfo.ini')
@@ -223,8 +298,15 @@ class Application(object):
             return None
     
     def get_rating(self):
-        """Récupère la note de l'application
-           Renvoie : (note, votes) si le dépôt le permet, None sinon"""
+        """
+            Récupère l'évaluation de l'application
+            
+            Renvoie :
+                Si le dépôt supporte les évaluations : tuple (rating, votes)
+                    rating : note sur 100
+                    votes : nombre de votes
+                Sinon : None
+        """
         if self.repository == None:
             # Application locale non présente dans les dépôts
             return None
@@ -252,6 +334,13 @@ class Application(object):
         return (self.rating, self.votes)
     
     def get_screenshots(self):
+        """
+            Récupère la liste des captures d'écran
+            
+            Renvoie :
+                Si le dépôt supporte les évaluations : liste des captures d'écran
+                Sinon : None
+        """
         """Récupère la liste des captures d'écran
            Renvoie : liste de lien vers les captures d'écran si le dépôt
                      le permet, None sinon"""
@@ -276,20 +365,29 @@ class Application(object):
         
         return self.screenshots
     
-    def install(self, callback=None, *args, **kwargs):
-        """Installe l'application"""
+    def install(self):
+        """Installe l'application et ses dépendances"""
         if self.is_installed():
             logger.warning(u"L'application %s est déjà installée" % self.id)
             raise ApplicationAlreadyInstalled(self)
         
-        if callback == None:
-            callback = lambda a,b : None
-        
         dependency_tree = self.get_dependency_tree()
         self.check_size(dependency_tree)
-        dependency_tree.install(callback, False, *args, **kwargs)
+        
+        callbacks = {'end': [lambda a: a.set_installed_as('explicit')]}
+        
+        dependency_tree.install(callbacks)
     
     def get_installation_dirs(self, filename):
+        """
+            Arguments : 
+                filename : chemin vers le paquet
+            
+            Renvoie :
+                (application_root, install_dir)
+                    application_root : racine de l'application
+                    install_dir : dossier dans lequel le paquet doit être extrait
+        """
         try:
             package = zipfile.ZipFile(filename, 'r')
         except Exception as e:
@@ -316,12 +414,20 @@ class Application(object):
         return application_root, install_dir
         
     def is_installed(self):
-        """Renvoie : True si l'application est installée, False sinon."""
+        """
+            Renvoie :
+                True si l'application est installée
+                False sinon
+        """
         return os.path.isdir('./cache/installed/' + self.id)
     
     def is_up_to_date(self):
-        """Renvoie : True si l'application est à jour, False sinon."""
-        installed = get_installed_version()
+        """
+            Renvoie :
+                True si l'application est à jour,
+                False sinon
+        """
+        installed = self.get_installed_version()
         
         if installed:
             if installed['version'] > self.version:
@@ -334,7 +440,9 @@ class Application(object):
             return False
     
     def set_rating(self, rating, votes):
-        """Modifie l'évaluation et les votes de l'application"""
+        """
+            Modifie (localement) l'évaluation et les votes de l'application
+        """
         self.rating = rating
         self.votes = votes
         self.database.set_rating(self.id, self.branch, self.repository, rating, votes)

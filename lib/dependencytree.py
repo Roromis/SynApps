@@ -4,7 +4,17 @@
 from exceptions import *
 
 class DependencyTree(object):
+    """Arbre des dépendances d'une application"""
     def __init__(self, database, root, path=[]):
+        """
+            Arguments :
+                database : Base de donnée des applications
+                root : Application à la racine de l'arbre
+                path : Liste représentant le chemin parcouru pour accéder à
+                       l'application (path[i+1] est une dépendance de path[i])
+        """
+        self.database = database
+        
         path.append(root.id)
         
         self.root = root
@@ -34,16 +44,17 @@ class DependencyTree(object):
         if len(nonexisting_depends) > 0:
             raise NonExistingDepends(root.id, nonexisting_depends)
     
-    def display(self, indent=0):
-        """Affiche l'arbre des dépendances (pour débugger)"""
-        print indent*"   "  + self.root.id
-        for i in self.children:
-            i.display(indent+1)
-    
     def get_size(self, depends=[]):
-        """Renvoie : la liste des dépendances à installer, l'espace nécessaire
-                     dans le dossier temporaire et l'espace nécessaire sur la
-                     clé"""
+        """
+            Arguments :
+                depends : liste des dépendances dont la taille a déjà été prise
+                          en compte (utilisé lors de l'appel récursif)
+            
+            Renvoie : (depends, size_c, size_u)
+                depends : liste des dépendances à installer
+                size_c : espace nécessaire dans le dossier temporaire
+                size_u : espace nécessaire dans le dossier des applications
+        """
         if self.root.id not in depends and not self.root.is_installed():
             depends.append(self.root.id)
             
@@ -63,10 +74,10 @@ class DependencyTree(object):
         else:
             return depends, 0, 0
     
-    def install(self, callback, is_depend=False, *args, **kwargs):
+    def install(self, callbacks={}):
         """Installe les dépendances, puis la racine (parcours postfixe)"""
         
         for child in self.children:
-            child.install(callback, is_depend=True, *args, **kwargs)
+            child.install()
         
-        self.root._install(callback, is_depend=is_depend, *args, **kwargs)
+        self.database.operations_queue.append_install(self.root, callbacks)

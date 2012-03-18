@@ -2,24 +2,37 @@
 # -*- coding: utf-8 -*-
 
 class ApplicationAlreadyInstalled(Exception):
-    """Exception levee lorsque l'application à installer est dejà
-       installee.
+    """
+        Exception levée lorsque l'application à installer est déjà installée.
 
-    Attributs:
-        application : Classe application
+        Attributs:
+            application : Classe application
     """
     def __init__(self, application):
         self.application = application
     
     def __str__(self):
-        return u"L'application %s est dejà installee." % self.application.id
+        return u"L'application %s est deja installee." % self.application.id
+
+class ApplicationAlreadyInQueue(Exception):
+    """
+        Exception levée lorsque l'application est déjà dans la queue
+
+        Attributs:
+            application : Classe application
+    """
+    def __init__(self, application):
+        self.application = application
+    
+    def __str__(self):
+        return u"L'application %s est deja dans la queue." % self.application.id
 
 class InvalidDepends(Exception):
-    """Exception levee lorsqu'une application est dans ses propres
-       dependances.
+    """
+        Exception levée lorsqu'une application est dans ses propres dépendances.
 
-    Attributs:
-        application : Id de l'application
+        Attributs:
+            application : Id de l'application
     """
     def __init__(self, id):
         self.application = id
@@ -28,12 +41,12 @@ class InvalidDepends(Exception):
         return u"Les dependances de l'application %s sont invalides." % self.application
 
 class InvalidPackage(Exception):
-    """Exception levee lorsqu'il est impossible de lire le contenu d'un
-       paquet.
+    """
+        Exception levée lorsqu'il est impossible de lire le contenu d'un paquet.
 
-    Attributs:
-        application : Classe application
-        error       : erreur ayant declenche cette exception
+        Attributs:
+            application : Classe application
+            error : Erreur ayant declenché cette exception
     """
     def __init__(self, application, error):
         self.application = application
@@ -43,12 +56,12 @@ class InvalidPackage(Exception):
         return u"Le paquet %s est invalide." % self.application.id
 
 class InvalidRepository(Exception):
-    """Exception levee lorsqu'il est impossible de lire le contenu d'un
-       depot.
+    """
+        Exception levée lorsqu'il est impossible de lire le contenu d'un dépôt.
 
-    Attributs:
-        repository : addresse du depot
-        error      : erreur ayant declenche cette exception
+        Attributs:
+            repository : addresse du depot
+            error : Erreur ayant declenché cette exception
     """
     def __init__(self, repository, error):
         self.repository = repository
@@ -58,12 +71,12 @@ class InvalidRepository(Exception):
         return u"Le depot %s est invalide." % self.repository
 
 class NonExistingDepends(Exception):
-    """Exception levee lorsqu'une application a des dependances
-       inexistantes.
+    """
+        Exception levée lorsqu'une application a des dépendances inexistantes.
 
-    Attributs:
-        application : Id de l'application
-        depends     : Dependances inexistantes
+        Attributs:
+            application : Id de l'application
+            depends : Dépendances inexistantes
     """
     def __init__(self, id, depends):
         self.application = id
@@ -79,12 +92,13 @@ class NonExistingDepends(Exception):
         return u"Les dependances %s de l'application %s sont introuvables." % (self.str_of_list(), self.application)
 
 class NoSuchApplication(Exception):
-    """Exception levee lorsque l'application recherchee n'existe pas.
+    """
+        Exception levée lorsque l'application recherchée n'existe pas.
 
-    Attributs:
-        id         : id de l'application
-        branch     : branche de l'application
-        repository : depot de l'application
+        Attributs:
+            id         : Identifiant de l'application
+            branch     : Branche de l'application
+            repository : Dépôt de l'application
     """
     def __init__(self, id, branch, repository):
         self.id = id
@@ -105,11 +119,12 @@ class NoSuchApplication(Exception):
         return u"L'application %s%s n'est pas presente dans %s" % (branch, self.id, repository)
 
 class NotEnoughRootFreeSpace(Exception):
-    """Exception levee lorsqu'il n'y a pas assez d'espace pour installer
-       l'application.
+    """
+        Exception levée lorsqu'il n'y a pas assez d'espace pour installer
+        l'application.
 
-    Attributs:
-        space : Espace manquant
+        Attributs:
+            space : Espace manquant
     """
     def __init__(self, space):
         self.space = space
@@ -118,11 +133,12 @@ class NotEnoughRootFreeSpace(Exception):
         return u"Pas assez d'espace disponible (%d octets supplementaires necessaires)." % self.space
 
 class NotEnoughTmpFreeSpace(Exception):
-    """Exception levee lorsqu'il n'y a pas assez d'espace telecharger
-       les paquets.
+    """
+        Exception levée lorsqu'il n'y a pas assez d'espace télécharger les
+        paquets.
 
-    Attributs:
-        space : Espace manquant
+        Attributs:
+            space : Espace manquant
     """
     def __init__(self, space):
         self.space = space
@@ -131,11 +147,12 @@ class NotEnoughTmpFreeSpace(Exception):
         return u"Pas assez d'espace disponible (%d octets supplementaires necessaires)." % self.space
 
 class PackageDownloadError(Exception):
-    """Exception levee lorsque le paquet ne peut pas être telecharge.
+    """
+        Exception levée lorsque le paquet ne peut pas être téléchargé.
 
-    Attributs:
-        application : Classe application
-        error       : erreur ayant declenche cette exception
+        Attributs:
+            application : Classe application
+            error : Erreur ayant déclenché cette exception
     """
     def __init__(self, application, error):
         self.application = application
@@ -145,12 +162,12 @@ class PackageDownloadError(Exception):
         return u"Erreur lors du telechargement de l'application %s." % self.application.id
         
 class RepositoryConnectionError(Exception):
-    """Exception levee lorsqu'il est impossible de se connecter à un
-       depot.
+    """
+        Exception levée lorsqu'il est impossible de se connecter à un dépôt.
 
     Attributs:
-        repository : addresse du depot
-        error      : erreur ayant declenche cette exception
+        repository : Adresse du dépôt
+        error : Erreur ayant déclenché cette exception
     """
     def __init__(self, repository, error):
         self.repository = repository
