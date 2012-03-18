@@ -618,6 +618,20 @@ class database():
                 if application != None:
                     yield application
     
+    def get_links(self, id, branch, repository):
+        """
+            Arguments :
+                id : Identifiant de l'application
+                branch : Branche de l'application
+                repository : Dépôt de l'application
+            
+            Renvoie : La liste des liens de l'application
+        """
+        links = self.query("SELECT title, uri FROM links WHERE application = ? "
+                           "AND branch = ? AND repository = ?",
+                           (id, branch, repository))
+        return map(dict, links)
+    
     def get_repositories(self):
         """Renvoie : La liste des dépôts"""
         return self.query('SELECT uri, hash FROM repositories')

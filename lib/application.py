@@ -73,7 +73,7 @@ class Application(object):
                     'Stable' : 2
                }
     
-    def __init__(self, database, infos, depends=None, icons=None):
+    def __init__(self, database, infos, depends=None, icons=None, links=None):
         """
             Initialisation : récupération des icônes et dépendances dans la base
             de donnée
@@ -103,8 +103,11 @@ class Application(object):
                                      sont pas supportées, -1 si elles n'ont pas
                                      été téléchargées)
                 depends : Liste des identifiants des dépendances directes
-                icons : dictionnaire contenant les icônes
-                    icons[size] : chemin vers l'icône de taille size
+                icons : Dictionnaire contenant les icônes
+                    icons[size] : Chemin vers l'icône de taille size
+                links : Liste des liens
+                    links[i]['title'] : Titre du lien
+                    links[i]['uri'] : Adresse du lien
         """
         self.database = database
         self.infos = infos
@@ -119,6 +122,11 @@ class Application(object):
             self.icons = database.get_icons(self.id, self.branch, self.repository)
         else:
             self.icons = icons
+        
+        if links == None:
+            self.links = database.get_links(self.id, self.branch, self.repository)
+        else:
+            self.links = links
         
         self.comments = False
         self.screenshots = False

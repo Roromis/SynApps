@@ -71,14 +71,6 @@ def main():
     logger.debug(u"Version : %s" % db.get_config("version"))
     db.update(force=True)
     
-    def d(s):
-        print s
-    
-    db.operations_queue.add_callback('install', 'start', lambda a: d(u"Début de l'installation de %s" % (a.id,)))
-    db.operations_queue.add_callback('install', 'progress', lambda a,p,m: d(u"%s : %s (%d)" % (a.id,m,p)))
-    db.operations_queue.add_callback('install', 'end', lambda a: d(u"Fin de l'installation de %s" % (a.id,)))
-    db.get_application('7-zipPortable').install()
-    
     return 0
 
 if __name__ == '__main__':
