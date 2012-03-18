@@ -19,10 +19,7 @@ from application import Application
 from operationsqueue import OperationsQueue
 
 from exceptions import *
-
-def cmp_version(a,b):
-    """Compare deux chaînes représentant une version."""
-    return -cmp(version.LooseVersion(a), version.LooseVersion(b))
+from functions import get_size, cmp_version
 
 def get_application_cfg_infos(cfg, section, repository):
     """Récupère les informations sur une application dans le dépôt."""
@@ -79,17 +76,6 @@ def get_repository_cfg(uri):
         raise InvalidRepository(uri, e)
     
     return cfg
-
-def get_size(path):
-    """Renvoie : la taille du dossier ou fichier path"""
-    size = 0
-    if os.path.isfile(path):
-        size = os.path.getsize(path)
-    elif os.path.isdir(path):
-        for dirpath, dirnames, filenames in os.walk(path):
-            for filename in filenames:
-                size += os.path.getsize(os.path.join(dirpath, filename))
-    return size
 
 class database():
     def __init__(self):
