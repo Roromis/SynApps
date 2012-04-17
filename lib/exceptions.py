@@ -27,6 +27,19 @@ class ApplicationAlreadyInQueue(Exception):
     def __str__(self):
         return u"L'application %s est deja dans la queue." % self.application.id
 
+class ApplicationNotInstalled(Exception):
+    """
+        Exception levée lorsque l'application à désinstaller n'est pas installée
+
+        Attributs:
+            application : Classe application
+    """
+    def __init__(self, application):
+        self.application = application
+    
+    def __str__(self):
+        return u"L'application %s n'est pas installee." % self.application.id
+
 class InvalidDepends(Exception):
     """
         Exception levée lorsqu'une application est dans ses propres dépendances.

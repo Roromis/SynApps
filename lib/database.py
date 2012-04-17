@@ -19,7 +19,7 @@ from application import Application
 from operationsqueue import OperationsQueue
 
 from exceptions import *
-from functions import get_size, cmp_version
+from functions import get_size, cmp_version, md5file
 
 def get_application_cfg_infos(cfg, section, repository):
     """Récupère les informations sur une application dans le dépôt."""
@@ -178,7 +178,7 @@ class database():
             self.curseur = self.connection.cursor()
             
             # On force les évaluations à être mises à jour
-            self.execute("UPDATE applications SET votes = -1")
+            self._execute("UPDATE applications SET votes = -1")
         
         # Tri
         self.connection.create_collation("unicode", strcoll)
@@ -187,7 +187,7 @@ class database():
         # Queue des opérations
         self.operations_queue = OperationsQueue()
         
-    def add_application(self, id, branch, repository, category, name,
+    def _add_application(self, id, branch, repository, category, name,
                         friendly_name, short_description,
                         long_description, size_c, size_u, version,
                         license, author, show, uri):
@@ -222,7 +222,7 @@ class database():
                 long_description, size_c, size_u, version,
                 license, author, show, uri))
     
-    def add_category(self, id, icon_uri, newhash, cfg):
+    def _add_category(self, id, icon_uri=None, newhash=None, cfg=None):
         """
             Ajoute une catégorie ou la modifie si elle existe
             
@@ -233,8 +233,16 @@ class database():
                 cfg : Objet ConfigParser associé au fichier de configuration du
                       dépôt
         """
-        hash = self.get_category_hash(id)
-        if hash != newhash:
+        hash = self._get_category_hash(id)
+        if newhash == None:
+            # La catégorie est celle d'une application installée, pas d'informations
+             if hash == None:
+                # La catégorie n'existe pas
+                self.curseur.execute("INSERT INTO categories (id, hash) "
+                        "VALUES (?, ?)", (id, ''))
+                # On ajoute les parents de la catégorie
+                self._add_category(get_category_parent(id))
+        elif hash != newhash:
             # Le hash a changé
             if not os.path.isfile('./cache/icons/' + newhash + '.png'):
                 try:
@@ -248,12 +256,12 @@ class database():
                 self.curseur.execute("INSERT INTO categories (id, hash) "
                         "VALUES (?, ?)", (id, newhash))
                 # On ajoute les parents de la catégorie
-                self.add_category(*get_category_cfg_infos(cfg, get_category_parent(id)))
+                self._add_category(*get_category_cfg_infos(cfg, get_category_parent(id)))
             else:
                 self.curseur.execute("UPDATE categories SET hash = ? "
                         "WHERE id = ?", (newhash, id))
     
-    def add_depend(self, id, branch, repository, depend):
+    def _add_depend(self, id, branch, repository, depend):
         """
             Ajoute une dépendance
         
@@ -266,7 +274,7 @@ class database():
         self.curseur.execute("INSERT INTO depends (application, branch, repository, depend) "
                 "VALUES (?, ?, ?, ?)", (id, branch, repository, depend))
     
-    def add_icon(self, id, branch, repository, size, uri, hash):
+    def _add_icon(self, id, branch, repository, size, uri, hash):
         """
             Ajoute une icône d'une application
             
@@ -288,7 +296,7 @@ class database():
             except NoOptionError:
                 logger.warning(u"Impossible de télécharger l'icône %s." % uri)
     
-    def add_link(self, id, branch, repository, title, uri):
+    def _add_link(self, id, branch, repository, title, uri):
         """
             Ajoute un lien
             
@@ -302,7 +310,7 @@ class database():
         self.curseur.execute("INSERT INTO links (application, branch, repository, title, uri) "
                 "VALUES (?, ?, ?, ?, ?)", (id, branch, repository, title, uri))
     
-    def add_recommendation(self, repository, recommendation):
+    def _add_recommendation(self, repository, recommendation):
         """
             Ajoute une recommendation
             
@@ -312,33 +320,8 @@ class database():
         """
         self.curseur.execute("INSERT INTO recommendations (repository, application) "
                 "VALUES (?, ?)", (repository, recommendation))
-    
-    def add_repository(self, uri):
-        """
-            Ajoute un dépôt
-            
-            Arguments :
-                uri : Adresse du Dépôt
-        """
-        self.execute("INSERT INTO repositories (uri) VALUES (?)", (uri,))
-    
-    def application_exists(self, id):
-        """
-            Renvoie :
-                True si l'application est dans la base de donnée
-                False sinon
-        """
-        return self.query("SELECT count(id) FROM applications WHERE id = ?", (id,))[0][0] > 0
-    
-    def count_applications(self, category):
-        """
-            Renvoie : Le nombre d'applications que contient la catégorie (et ses
-                      sous catégories)
-        """
-        return self.query("SELECT count(id) FROM applications "
-                "WHERE category LIKE ?", (category + "%",))[0][0]
         
-    def execute(self, query, data=()):
+    def _execute(self, query, data=()):
         """
             Éxecute une commande SQL nécessitant un "commit" (insertion,
             suppression, création de table...)
@@ -350,18 +333,7 @@ class database():
         
         return self.curseur.lastrowid
     
-    def get_application(self, id, branch=None, repository=None):
-        """
-            Arguments :
-                id : Identifiant de l'application
-                branch : Branche de l'application (facultatif)
-                repository : Dépôt de l'application (facultatif)
-            
-            Renvoie : l'application correspondante
-        """
-        return Application(self, self.get_application_infos(id, branch, repository))
-    
-    def get_application_infos(self, id, branch=None, repository=None, shown=False):
+    def _get_application_infos(self, id, branch=None, repository=None, shown=False):
         """
             Arguments :
                 id : Identifiant de l'application
@@ -375,10 +347,10 @@ class database():
         """
         if branch == None:
             if repository == None:
-                apps = self.query("SELECT * FROM applications WHERE id = ?"
+                apps = self._query("SELECT * FROM applications WHERE id = ?"
                                   "ORDER BY version COLLATE desc_versions", (id,))
             else:
-                apps = self.query("SELECT * FROM applications WHERE id = ? "
+                apps = self._query("SELECT * FROM applications WHERE id = ? "
                                   "AND repository = ? "
                                   "ORDER BY version COLLATE desc_versions", (id, repository))
             try:
@@ -401,11 +373,11 @@ class database():
                 raise NoSuchApplication(id, branch, repository)
         else:
             if repository == None:
-                apps = self.query("SELECT * FROM applications WHERE id = ? "
+                apps = self._query("SELECT * FROM applications WHERE id = ? "
                                   "AND branch ? "
                                   "ORDER BY version COLLATE desc_versions", (id, branch))
             else:
-                apps = self.query("SELECT * FROM applications WHERE id = ? "
+                apps = self._query("SELECT * FROM applications WHERE id = ? "
                                   "AND branch = ? "
                                   "AND repository = ? "
                                   "ORDER BY version COLLATE desc_versions", (id, branch, repository))
@@ -413,6 +385,174 @@ class database():
                 return dict(apps[0])
             else:
                 raise NoSuchApplication(id, branch, repository)
+    
+    def _get_category_hash(self, id):
+        """
+            Argument :
+                id : Identificant de la catégorie
+            
+            Renvoie : La somme md5 de l'icône de la catégorie
+        """
+        try:
+            return self._query("SELECT hash FROM categories "
+                    "WHERE id = ?", (id,))[0][0]
+        except IndexError:
+            return None
+
+    def _get_installed_application_cfg_infos(self, id):
+        repository = u''
+        
+        try:
+            cfg = ConfigParser({'Show' : 'True', 'InstallDir' : 'Apps', 'ApplicationRoot' : 'Apps/%s' % id})
+            cfg.read(['./cache/installed/' + id + '/appinfo.ini', './cache/installed/' + id + '/installer.ini'])
+            
+            root = os.path.join(self.get_config('rootpath'), cfg.get('Framakey', 'ApplicationRoot'))
+            if os.path.exists(root):
+                size_u = get_size(root)
+            else:
+                logger.debug(u"L'application %s n'est plus installée, suppression des fichiers de cache." % id)
+                shutil.rmtree('./cache/installed/' + id)
+                return None, None, None
+            
+            try:
+                branch = cfg.get('Framakey', 'Branch')
+            except NoOptionError:       # Rétrocompatibilité
+                branch = cfg.get('Framakey', 'Repository')
+            category = cfg.get('Details', 'Category')
+            name = cfg.get('Framakey', 'Name')
+            friendly_name = cfg.get('Framakey', 'FriendlyName')
+            short_description = cfg.get('Details', 'Description')
+            long_description = cfg.get('Framakey', 'LongDesc')
+            size_c = 0
+            
+            version = cfg.get('Version', 'PackageVersion')
+            license = cfg.get('Framakey', 'License')
+            author = cfg.get('Details', 'Publisher')
+            show = cfg.getboolean('Framakey', 'Show')
+            uri = ''
+        except (NoSectionError, NoOptionError):
+            logger.debug(u"Les informations de l'application %s sont incomplètes." % id)
+            return None, None, None
+        
+        depends = []
+        i = 1
+        while cfg.has_option('Framakey', 'Depend%d'%i):
+            depends.append(cfg.get('Framakey', 'Depend%d'%i))
+            i += 1
+        
+        links = []
+        try:
+            links.append(('Fiche Framakey', cfg.get('Details', 'Homepage')))
+        except (NoSectionError, NoOptionError):
+            pass
+        
+        try:
+            links.append(('Fiche Framasoft', cfg.get('Framakey', 'FramasoftPage')))
+        except (NoSectionError, NoOptionError):
+            pass
+        
+        try:
+            links.append(('Site Officiel', cfg.get('Framakey', 'AppWebsite')))
+        except (NoSectionError, NoOptionError):
+            pass
+        
+        return (id, branch, repository, category, name, friendly_name, 
+                short_description, long_description, size_c, size_u, 
+                version, license, author, show, uri), links, depends
+    
+    def _icon_used(self, hash):
+        """
+            Arguments :
+                hash : Somme md5 d'une icône
+            
+            Renvoie : True si l'icône est utilisée, False sinon.
+        """
+        if self._query('SELECT COUNT(hash) FROM categories WHERE hash = ?', (hash,))[0][0] > 0:
+            # L'icône est utilisée pour une catégorie
+            return True
+        elif self._query('SELECT COUNT(hash) FROM icons WHERE hash = ?', (hash,))[0][0] > 0:
+            # L'icône est utilisée pour une application
+            return True
+        else:
+            return False
+    
+    def _query(self, query, data=()):
+        """Éxecute une commande SQL de type "SELECT"
+           Renvoie : les données récupérées"""
+        self.curseur.execute(query, data)
+        return self.curseur.fetchall()
+    
+    def _remove_all_from_repository(self, uri):
+        """
+            Supprime le contenu d'un dépôt
+            
+            Arguments :
+                uri : Adresse du dépôt
+        """
+        self._execute("DELETE FROM applications WHERE repository = ?", (uri,))
+        self._execute("DELETE FROM recommendations WHERE repository = ?", (uri,))
+        
+        self._execute("DELETE FROM depends WHERE repository = ?", (uri,))
+        self._execute("DELETE FROM links WHERE repository = ?", (uri,))
+        self._execute("DELETE FROM icons WHERE repository = ?", (uri,))
+    
+    def _remove_empty_categories(self):
+        """Supprime les catégories vides"""
+        for category in self.get_categories():
+            if category.count_applications() == 0:
+                category.remove()
+    
+    def _remove_old_icons(self):
+        """Supprime les icônes inutilisées"""
+        for filename in os.listdir("./cache/icons"):
+            if not self._icon_used(filename[:-4]):
+                os.remove("./cache/icons/" + filename)
+    
+    def _set_repository_hash(self, uri, hash):
+        """
+            Modifie la somme md5 associée à un dépôt
+            
+            Arguments :
+                uri : Adresse du dépôt
+                hash : Nouvelle somme md5
+        """
+        self.curseur.execute("UPDATE repositories SET hash = ? WHERE uri = ?", (hash, uri))
+    
+    def add_repository(self, uri):
+        """
+            Ajoute un dépôt
+            
+            Arguments :
+                uri : Adresse du Dépôt
+        """
+        self._execute("INSERT INTO repositories (uri) VALUES (?)", (uri,))
+    
+    def application_exists(self, id):
+        """
+            Renvoie :
+                True si l'application est dans la base de donnée
+                False sinon
+        """
+        return self._query("SELECT count(id) FROM applications WHERE id = ?", (id,))[0][0] > 0
+    
+    def count_applications(self, category):
+        """
+            Renvoie : Le nombre d'applications que contient la catégorie (et ses
+                      sous catégories)
+        """
+        return self._query("SELECT count(id) FROM applications "
+                "WHERE category LIKE ?", (category + "%",))[0][0]
+    
+    def get_application(self, id, branch=None, repository=None):
+        """
+            Arguments :
+                id : Identifiant de l'application
+                branch : Branche de l'application (facultatif)
+                repository : Dépôt de l'application (facultatif)
+            
+            Renvoie : l'application correspondante
+        """
+        return Application(self, self._get_application_infos(id, branch, repository))
     
     def get_applications(self, category=''):
         """
@@ -423,13 +563,13 @@ class database():
                 Les applications que contient la catégorie (et ses sous
                 catégories)
         """
-        applications = self.query("SELECT * FROM applications "
+        applications = self._query("SELECT * FROM applications "
                 "WHERE category LIKE ?", (category + "%",))
         return [Application(self, dict(i)) for i in applications]
     
     def get_categories(self):
         """Renvoie : La liste de toutes les catégories"""
-        categories = self.query("SELECT id FROM categories")
+        categories = self._query("SELECT id FROM categories")
         return map(lambda (a,):self.get_category(a), categories)
     
     def get_category(self, id):
@@ -441,19 +581,6 @@ class database():
         """
         return Category(self, id)
     
-    def get_category_hash(self, id):
-        """
-            Argument :
-                id : Identificant de la catégorie
-            
-            Renvoie : La somme md5 de l'icône de la catégorie
-        """
-        try:
-            return self.query("SELECT hash FROM categories "
-                    "WHERE id = ?", (id,))[0][0]
-        except IndexError:
-            return None
-    
     def get_category_icon(self, id):
         """
             Argument :
@@ -461,7 +588,7 @@ class database():
             
             Renvoie : L'icône de la catégorie
         """
-        hash = self.get_category_hash(id)
+        hash = self._get_category_hash(id)
         if hash:
             return './cache/icons/' + hash + '.png'
         else:
@@ -502,10 +629,11 @@ class database():
             
             Renvoie : La liste des dépendances de l'application
         """
-        depends = self.query("SELECT depend FROM depends WHERE application = ? "
+        depends = self._query("SELECT depend FROM depends WHERE application = ? "
                     "AND branch = ? AND repository = ?",
                     (id, branch, repository))
         return map(lambda (a,):a, depends)
+        
     
     def get_icon_hash(self, id, branch, repository, size):
         """
@@ -520,7 +648,7 @@ class database():
                 None sinon
         """
         try:
-            return self.query("SELECT hash FROM icons WHERE application = ? "
+            return self._query("SELECT hash FROM icons WHERE application = ? "
                     "AND branch = ? AND repository = ? AND size = ? ",
                     (id, branch, repository, size))[0]
         except IndexError:
@@ -535,7 +663,7 @@ class database():
             
             Renvoie : Les icônes de l'application
         """
-        icons = self.query("SELECT size, hash FROM icons WHERE application = ? AND branch = ? AND repository = ?",
+        icons = self._query("SELECT size, hash FROM icons WHERE application = ? AND branch = ? AND repository = ?",
                     (id, branch, repository))
         icons = map(lambda (a,b):(a,'./cache/icons/'+b+'.png'), icons)
         return dict(icons)
@@ -613,14 +741,25 @@ class database():
             
             Renvoie : La liste des liens de l'application
         """
-        links = self.query("SELECT title, uri FROM links WHERE application = ? "
+        links = self._query("SELECT title, uri FROM links WHERE application = ? "
                            "AND branch = ? AND repository = ?",
                            (id, branch, repository))
         return map(dict, links)
     
+    def get_provides(self, id):
+        """
+            Arguments :
+                id : Identifiant de l'application
+            
+            Renvoie : La liste des applications qui en dépendent
+        """
+        provides = self._query("SELECT id, branch, repository FROM depends"
+                              "WHERE depend = ?", (id,))
+        return map(lambda (a,):a, provides)
+    
     def get_repositories(self):
         """Renvoie : La liste des dépôts"""
-        return self.query('SELECT uri, hash FROM repositories')
+        return self._query('SELECT uri, hash FROM repositories')
     
     def get_subcategories(self, id=''):
         """
@@ -630,42 +769,6 @@ class database():
             Renvoie : Les sous catégories"""
         return [i for i in self.get_categories() if get_category_parent(i) == id]
     
-    def icon_used(self, hash):
-        """
-            Arguments :
-                hash : Somme md5 d'une icône
-            
-            Renvoie : True si l'icône est utilisée, False sinon.
-        """
-        if self.query('SELECT COUNT(hash) FROM categories WHERE hash = ?', (hash,))[0][0] > 0:
-            # L'icône est utilisée pour une catégorie
-            return True
-        elif self.query('SELECT COUNT(hash) FROM icons WHERE hash = ?', (hash,))[0][0] > 0:
-            # L'icône est utilisée pour une application
-            return True
-        else:
-            return False
-    
-    def query(self, query, data=()):
-        """Éxecute une commande SQL de type "SELECT"
-           Renvoie : les données récupérées"""
-        self.curseur.execute(query, data)
-        return self.curseur.fetchall()
-    
-    def remove_all_from_repository(self, uri):
-        """
-            Supprime le contenu d'un dépôt
-            
-            Arguments :
-                uri : Adresse du dépôt
-        """
-        self.execute("DELETE FROM applications WHERE repository = ?", (uri,))
-        self.execute("DELETE FROM recommendations WHERE repository = ?", (uri,))
-        
-        self.execute("DELETE FROM depends WHERE repository = ?", (uri,))
-        self.execute("DELETE FROM links WHERE repository = ?", (uri,))
-        self.execute("DELETE FROM icons WHERE repository = ?", (uri,))
-    
     def remove_category(self, id):
         """
             Supprime une catégorie
@@ -674,40 +777,6 @@ class database():
                 id : Identifiant de la catégorie
         """
         self.curseur.execute("DELETE FROM categories WHERE id = ?", (id,))
-    
-    def remove_empty_categories(self):
-        """Supprime les catégories vides"""
-        for category in self.get_categories():
-            if category.count_applications() == 0:
-                category.remove()
-    
-    def remove_old_icons(self):
-        """Supprime les icônes inutilisées"""
-        for filename in os.listdir("./cache/icons"):
-            if not self.icon_used(filename[:-4]):
-                os.remove("./cache/icons/" + filename)
-    
-    def remove_uninstalled_applications_infos(self):
-        """
-            Supprime les informations stockées dans le dossier cache/installed
-            sur des applications non installées
-        """
-        for id in os.listdir('./cache/installed'):
-            cfg = ConfigParser({
-                    'Show' : 'True',
-                    'InstallDir' : 'Apps',
-                    'ApplicationRoot' : 'Apps/%s' % id
-                })
-            cfg.add_section("Framakey")
-            cfg.read('./cache/installed/' + id + '/installer.ini')
-            
-            root = os.path.join(self.get_config('rootpath'), 
-                                cfg.get('Framakey', 'ApplicationRoot'))
-            if not os.path.exists(root):
-                # L'application n'est pas présente sur la clé, elle a
-                # probablement été supprimée manuellement
-                logger.debug(u"L'application %s n'est plus installée, suppression des fichiers de cache." % id)
-                shutil.rmtree('./cache/installed/' + id)
     
     def set_config(self, name, value):
         """
@@ -719,9 +788,9 @@ class database():
         """
         self.curseur.execute("SELECT * FROM config WHERE name = ?", (name,))
         if self.curseur.fetchone() == None:
-            self.execute("INSERT INTO config (name, value) VALUES (?, ?)", (name, str(value)))
+            self._execute("INSERT INTO config (name, value) VALUES (?, ?)", (name, str(value)))
         else:
-            self.execute("UPDATE config SET value = ? WHERE name = ?", (str(value), name))
+            self._execute("UPDATE config SET value = ? WHERE name = ?", (str(value), name))
     
     def set_rating(self, id, branch, repository, rating, votes):
         """
@@ -734,19 +803,9 @@ class database():
                 rating : Nouvelle note
                 votes : Nombre de votes
         """
-        self.execute("UPDATE applications SET rating = ?, votes = ? "
+        self._execute("UPDATE applications SET rating = ?, votes = ? "
                      "WHERE id = ? AND branch = ? AND repository = ?",
                      (rating, votes, id, branch, repository))
-    
-    def set_repository_hash(self, uri, hash):
-        """
-            Modifie la somme md5 associée à un dépôt
-            
-            Arguments :
-                uri : Adresse du dépôt
-                hash : Nouvelle somme md5
-        """
-        self.curseur.execute("UPDATE repositories SET hash = ? WHERE uri = ?", (hash, uri))
     
     def update(self, force=False):
         """
@@ -769,17 +828,17 @@ class database():
                 logger.debug(u"Le dépôt %s n'a pas été modifié." % repository['uri'])
             else:
                 logger.debug(u"Le dépôt %s a été modifié (ou la mise à jour a été forcée).", repository['uri'])
-                self.set_repository_hash(repository['uri'], new_hash)
+                self._set_repository_hash(repository['uri'], new_hash)
                 
                 logger.debug(u"Suppression des anciennes applications du dépôt.")
-                self.remove_all_from_repository(repository['uri'])
+                self._remove_all_from_repository(repository['uri'])
                 
                 cfg = get_repository_cfg(repository['uri'])
                 
                 logger.debug(u"Insertion des recommendations du dépôt.")
                 i = 1
                 while cfg.has_option('repository', 'recommendation%d'%i):
-                    self.add_recommendation(repository['uri'], cfg.get('repository', 'recommendation%d'%i))
+                    self._add_recommendation(repository['uri'], cfg.get('repository', 'recommendation%d'%i))
                     i += 1
                 
                 logger.debug(u"Insertion des applications du dépôt.")
@@ -788,31 +847,54 @@ class database():
                         logger.debug(u"Insertion de %s." % section)
                         try:
                             branch, id = tuple(section.split(":", 1))
-                            self.add_application(*get_application_cfg_infos(cfg, section, repository['uri']))
-                            self.add_category(*get_category_cfg_infos(cfg, cfg.get(section, 'category')))
+                            self._add_application(*get_application_cfg_infos(cfg, section, repository['uri']))
+                            self._add_category(*get_category_cfg_infos(cfg, cfg.get(section, 'category')))
                             
                             i = 1
                             while cfg.has_option(section, 'link%d'%i):
-                                self.add_link(id, branch, repository['uri'], cfg.get(section, 'link%d_name'%i), cfg.get(section, 'link%d'%i))
+                                self._add_link(id, branch, repository['uri'], cfg.get(section, 'link%d_name'%i), cfg.get(section, 'link%d'%i))
                                 i += 1
                             
                             i = 1
                             while cfg.has_option(section, 'depend%d'%i):
-                                self.add_depend(id, branch, repository['uri'], cfg.get(section, 'depend%d'%i))
+                                self._add_depend(id, branch, repository['uri'], cfg.get(section, 'depend%d'%i))
                                 i += 1
                             
                             for size in [32,48,64,128]:
                                 if cfg.has_option(section, 'icon_%d'%size):
-                                    self.add_icon(id, branch, repository['uri'], size, cfg.get(section, 'icon_%d'%size), cfg.get(section, 'icon_%d_hash'%size))
+                                    self._add_icon(id, branch, repository['uri'], size, cfg.get(section, 'icon_%d'%size), cfg.get(section, 'icon_%d_hash'%size))
                             
                         except (NoSectionError, NoOptionError):
                             logger.warning(u"Les informations de l'application %s du dépôt %s sont incomplète." % (section,repository['uri']))
         
+        
+        logger.info(u"Recherche des applications installées.")
+        
+        logger.debug(u"Suppression des applications installées de la base de donnée.")
+        self._remove_all_from_repository('')
+        
+        logger.debug(u"Insertion des applications installées.")
+        for id in os.listdir('./cache/installed'):
+            infos, links, depends = self._get_installed_application_cfg_infos(id)
+            if infos:
+                self._add_application(*infos)
+                self._add_category(infos[3])
+                
+                for title, uri in links:
+                    self._add_link(id, infos[1], u'', title, uri)
+                
+                for depend in depends:
+                    self._add_depend(id, infos[1], u'', depend)
+                
+                for size in [32,48,64,128]:
+                    filename = './cache/installed/%s/appicon_%d.png' % (id, size)
+                    if os.path.isfile(filename):
+                        self._add_icon(id, infos[1], u'', size, filename, md5file(filename))
+        
         self.connection.commit()
         
-        self.remove_empty_categories()
-        self.remove_old_icons()
-        self.remove_uninstalled_applications_infos()
+        self._remove_empty_categories()
+        self._remove_old_icons()
         
         self.connection.commit()
         logger.info(u"Fin de la mise à jour des dépôts.")

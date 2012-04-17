@@ -17,7 +17,7 @@ import platform
 
 from dependencytree import DependencyTree
 from exceptions import *
-from functions import get_free_space, zipextractall
+from functions import get_free_space, zipextractall, rmtree
 
 class Application(object):
     """Classe représentant une application."""
@@ -100,7 +100,7 @@ class Application(object):
                 callback : fonction de signature def callback(progress, message)
         """
         if not self.is_installed():
-            logger.info(u"Installation du paquet %s." % self.id)
+            logger.info(u"Installation du paquet %s." % (self.id,))
             
             current_step = 0
             if os.path.isfile(self.uri):
@@ -113,9 +113,14 @@ class Application(object):
                 
                 logger.debug(u"Téléchargement du paquet.")
                 try:
-                    urllib.urlretrieve(self.uri, filename, lambda c,b,t: callback(current_step*100/steps + 100*c*b/(t*steps), u"Téléchargement du paquet"))
+                    urllib.urlretrieve(self.uri, filename, 
+                            lambda c,b,t: callback(
+                                    current_step*100/steps + 100*c*b/(t*steps),
+                                    u"Téléchargement du paquet")
+                            )
                 except (urllib2.URLError, urllib2.HTTPError) as e:
-                    logger.error(u"Erreur lors du téléchargement:\n" + u''.join(traceback.format_exc()))
+                    logger.error(u"Erreur lors du téléchargement:\n"
+                                 u''.join(traceback.format_exc()))
                     raise PackageDownloadError(self, e)
                 current_step += 1
                 
@@ -123,10 +128,15 @@ class Application(object):
             try:
                 application_root, install_dir = self.get_installation_dirs(filename)
                 zipextractall(filename,
-                        os.path.join(self.database.get_config('rootpath'), install_dir),
-                        lambda c,t: callback(current_step*100/steps + 100*c/(t*steps), u"Extraction du paquet"))
+                        os.path.join(self.database.get_config('rootpath'),
+                                     install_dir),
+                        lambda c,t: callback(
+                            current_step*100/steps + 100*c/(t*steps),
+                            u"Extraction du paquet")
+                        )
             except Exception as e:
-                logger.error(u"Le paquet %s est invalide:\n" % self.id + u''.join(traceback.format_exc()))
+                logger.error(u"Le paquet %s est invalide:\n"
+                             u''.join(traceback.format_exc()) % self.id)
                 raise InvalidPackage(self, e)
             
             logger.debug(u"Suppression du paquet.")
@@ -134,7 +144,8 @@ class Application(object):
                 
             logger.debug(u"Copie des informations dans le cache.")
             cache = os.path.join('./cache/installed/', self.id)
-            appinfo = os.path.join(self.database.get_config("rootpath"), application_root, 'App', 'AppInfo')
+            appinfo = os.path.join(self.database.get_config("rootpath"),
+                                   application_root, 'App', 'AppInfo')
             
             # Copie dans le cache
             os.mkdir(cache)
@@ -145,29 +156,27 @@ class Application(object):
             # Modification du fichier installer.ini
             self.set_installed_as("depend")
     
-    def set_installed_as(self, installed_as):
+    def _uninstall(self, callback):
         """
-            Modifie l'option InstalledAs dans le fichier installer.ini
+            Désinstalle l'application
             
             Arguments :
-                installed_as :
-                    'depend' si l'application a été installée en tant que
-                    dépendance, 'explicit' si l'application a été installée
-                    explicitement
+                callback : fonction de signature def callback(progress, message)
         """
-        filename = os.path.join('./cache/installed/', self.id, 'installer.ini')
-        
-        cfg = ConfigParser()
-        cfg.optionxform = str   # Pour conserver la casse
-        cfg.read(filename)
-        
-        if not cfg.has_section("Framakey"):
-            cfg.add_section("Framakey")
-        
-        cfg.set("Framakey", "InstalledAs", installed_as)
-        
-        with open(filename, "w") as f:
-            cfg.write(f)
+        if self.is_installed():
+            logger.info(u"Désinstallation du paquet %s." % (self.id,))
+            
+            application_root, install_dir = get_installation_dirs()
+            
+            # Suppression de l'application
+            rmtree(os.path.join(self.database.get_config('rootpath'),
+                                application_root), False,
+                                lambda c,t: callback(100*c/t,
+                                                u"Suppression de l'application")
+                    )
+            
+            # Suppression des fichiers de cache
+            rmtree('./cache/installed/' + self.id)
     
     def check_size(self, dependency_tree):
         """
@@ -340,40 +349,35 @@ class Application(object):
         
         dependency_tree.install(callbacks)
     
-    def get_installation_dirs(self, filename):
+    def get_installation_dirs(self, filename=None):
         """
             Arguments : 
-                filename : chemin vers le paquet
+                filename : chemin vers le paquet (facultatif)
             
             Renvoie :
                 (application_root, install_dir)
                     application_root : racine de l'application
                     install_dir : dossier dans lequel le paquet doit être extrait
         """
-        try:
-            package = zipfile.ZipFile(filename, 'r')
-        except Exception as e:
-            logger.error("Le paquet %s n'est pas une archive zip." % self.id)
-            raise InvalidPackage(self, e)
+        cfg = ConfigParser()
+        cfg = ConfigParser({'Show' : 'True', 'InstallDir' : 'Apps', 'ApplicationRoot' : 'Apps/%s' % self.id})
+        if filename:
+            try:
+                package = zipfile.ZipFile(filename, 'r')
+            except Exception as e:
+                logger.error("Le paquet %s n'est pas une archive zip." % self.id)
+                raise InvalidPackage(self, e)
+            
+            try:
+                inifile = package.read(self.id + '/App/AppInfo/installer.ini')
+                cfg.read_string(inifile.decode('utf-8'))
+            except:
+                return os.path.join('Apps', self.id), 'Apps'
+        else:
+            cfg.read('./cache/installed/' + self.id + '/installer.ini')
+            
         
-        try:
-            inifile = package.read(self.id + '/App/AppInfo/installer.ini')
-            cfg = ConfigParser()
-            cfg.read_string(inifile.decode('utf-8'))
-        except KeyError:
-            return os.path.join('Apps', self.id), 'Apps'
-        
-        try:
-            install_dir = cfg.get('Framakey', 'InstallDir')
-        except (NoOptionError, NoSectionError):
-            install_dir = 'Apps'
-        
-        try:
-            application_root = cfg.get('Framakey', 'InstallDir')
-        except (NoOptionError, NoSectionError):
-            application_root = os.path.join('Apps', self.id)
-        
-        return application_root, install_dir
+        return cfg.get('Framakey', 'ApplicationRoot'), cfg.get('Framakey', 'InstallDir')
         
     def is_installed(self):
         """
@@ -401,6 +405,30 @@ class Application(object):
         else:
             return False
     
+    def set_installed_as(self, installed_as):
+        """
+            Modifie l'option InstalledAs dans le fichier installer.ini
+            
+            Arguments :
+                installed_as :
+                    'depend' si l'application a été installée en tant que
+                    dépendance, 'explicit' si l'application a été installée
+                    explicitement
+        """
+        filename = os.path.join('./cache/installed/', self.id, 'installer.ini')
+        
+        cfg = ConfigParser()
+        cfg.optionxform = str   # Pour conserver la casse
+        cfg.read(filename)
+        
+        if not cfg.has_section("Framakey"):
+            cfg.add_section("Framakey")
+        
+        cfg.set("Framakey", "InstalledAs", installed_as)
+        
+        with open(filename, "w") as f:
+            cfg.write(f)
+    
     def set_rating(self, rating, votes):
         """
             Modifie (localement) l'évaluation et les votes de l'application
@@ -408,3 +436,18 @@ class Application(object):
         self.rating = rating
         self.votes = votes
         self.database.set_rating(self.id, self.branch, self.repository, rating, votes)
+    
+    def uninstall(self):
+        """
+            Désinstalle l'application
+        """
+        if not self.is_installed():
+            logger.warning(u"L'application %s n'est pas installée" % self.id)
+            raise ApplicationNotInstalled(self)
+        
+        dependency_tree = self.get_dependency_tree()
+        self.check_size(dependency_tree)
+        
+        callbacks = {'end': [lambda a: a.set_installed_as('explicit')]}
+        
+        dependency_tree.install(callbacks)
