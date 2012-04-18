@@ -190,7 +190,7 @@ class database():
     def _add_application(self, id, branch, repository, category, name,
                         friendly_name, short_description,
                         long_description, size_c, size_u, version,
-                        license, author, show, uri):
+                        license, author, show, uri, rating=0, votes=-1):
         """
             Ajoute une application
             
@@ -215,12 +215,12 @@ class database():
         self.curseur.execute("INSERT INTO applications (id, branch, repository, "
                 "category, name, friendly_name, short_description, "
                 "long_description, size_c, size_u, version, "
-                "license, author, show, uri) VALUES "
-                "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "license, author, show, uri, rating, votes) VALUES "
+                "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (id, branch, repository,
                 category, name, friendly_name, short_description,
                 long_description, size_c, size_u, version,
-                license, author, show, uri))
+                license, author, show, uri, rating, votes))
     
     def _add_category(self, id, icon_uri=None, newhash=None, cfg=None):
         """
@@ -458,7 +458,7 @@ class database():
         
         return (id, branch, repository, category, name, friendly_name, 
                 short_description, long_description, size_c, size_u, 
-                version, license, author, show, uri), links, depends
+                version, license, author, show, uri, 0, -2), links, depends
     
     def _icon_used(self, hash):
         """
@@ -751,10 +751,10 @@ class database():
             Arguments :
                 id : Identifiant de l'application
             
-            Renvoie : La liste des applications qui en dépendent
+            Renvoie : La liste des applications installées qui en dépendent
         """
-        provides = self._query("SELECT id, branch, repository FROM depends"
-                              "WHERE depend = ?", (id,))
+        provides = self._query("SELECT id FROM depends"
+                              "WHERE depend = ? AND repository = ''", (id,))
         return map(lambda (a,):a, provides)
     
     def get_repositories(self):

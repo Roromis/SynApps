@@ -92,6 +92,68 @@ class Application(object):
         """
         return self.infos[name]
     
+    def _check_size(self, dependency_tree):
+        """
+            Lève une exception s'il n'y a pas assez de place pour installer
+            l'application et ses dépendances
+            
+            Arguments :
+                dependency_tree : Arbre des dépendances
+        """
+        d, size_c, size_u = dependency_tree.get_size()
+        
+        rootpath = self.database.get_config("rootpath")
+        tmppath = self.database.get_config("tmppath")
+        
+        if os.path.splitext(rootpath)[0] == os.path.splitext(tmppath)[0]:
+            # Le dossier temporaire et la racine de la Framakey sont sur
+            # le même disque
+            remaining_space = get_free_space(rootpath) - size_c - size_u
+            if remaining_space < 0:
+                raise NotEnoughRootFreeSpace(-remaining_space)
+        else:
+            remaining_space = get_free_space(rootpath) - size_u
+            if remaining_space < 0:
+                raise NotEnoughRootFreeSpace(-remaining_space)
+            
+            remaining_space = get_free_space(tmppath) - size_c
+            if remaining_space < 0:
+                raise NotEnoughTmpFreeSpace(-remaining_space)
+    
+    def _get_dependency_tree(self):
+        """Renvoie l'arbre des dépendances de l'application"""
+        return DependencyTree(self.database, self)
+    
+    def _get_installation_dirs(self, filename=None):
+        """
+            Arguments : 
+                filename : chemin vers le paquet (facultatif)
+            
+            Renvoie :
+                (application_root, install_dir)
+                    application_root : racine de l'application
+                    install_dir : dossier dans lequel le paquet doit être extrait
+        """
+        cfg = ConfigParser()
+        cfg = ConfigParser({'Show' : 'True', 'InstallDir' : 'Apps', 'ApplicationRoot' : 'Apps/%s' % self.id})
+        if filename:
+            try:
+                package = zipfile.ZipFile(filename, 'r')
+            except Exception as e:
+                logger.error("Le paquet %s n'est pas une archive zip." % self.id)
+                raise InvalidPackage(self, e)
+            
+            try:
+                inifile = package.read(self.id + '/App/AppInfo/installer.ini')
+                cfg.read_string(inifile.decode('utf-8'))
+            except:
+                return os.path.join('Apps', self.id), 'Apps'
+        else:
+            cfg.read('./cache/installed/' + self.id + '/installer.ini')
+            
+        
+        return cfg.get('Framakey', 'ApplicationRoot'), cfg.get('Framakey', 'InstallDir')
+    
     def _install(self, callback):
         """
             Installe l'application (sans dépendances, sans vérifications)
@@ -126,7 +188,7 @@ class Application(object):
                 
             logger.debug(u"Extraction du paquet.")
             try:
-                application_root, install_dir = self.get_installation_dirs(filename)
+                application_root, install_dir = self._get_installation_dirs(filename)
                 zipextractall(filename,
                         os.path.join(self.database.get_config('rootpath'),
                                      install_dir),
@@ -154,7 +216,39 @@ class Application(object):
                     shutil.copy(os.path.join(appinfo, i), cache)
             
             # Modification du fichier installer.ini
-            self.set_installed_as("depend")
+            self._set_installed_as("depend")
+    
+    def _set_installed_as(self, installed_as):
+        """
+            Modifie l'option InstalledAs dans le fichier installer.ini
+            
+            Arguments :
+                installed_as :
+                    'depend' si l'application a été installée en tant que
+                    dépendance, 'explicit' si l'application a été installée
+                    explicitement
+        """
+        filename = os.path.join('./cache/installed/', self.id, 'installer.ini')
+        
+        cfg = ConfigParser()
+        cfg.optionxform = str   # Pour conserver la casse
+        cfg.read(filename)
+        
+        if not cfg.has_section("Framakey"):
+            cfg.add_section("Framakey")
+        
+        cfg.set("Framakey", "InstalledAs", installed_as)
+        
+        with open(filename, "w") as f:
+            cfg.write(f)
+    
+    def _set_rating(self, rating, votes):
+        """
+            Modifie (localement) l'évaluation et les votes de l'application
+        """
+        self.infos['rating'] = rating
+        self.infos['votes'] = votes
+        self.database.set_rating(self.id, self.branch, self.repository, rating, votes)
     
     def _uninstall(self, callback):
         """
@@ -166,7 +260,7 @@ class Application(object):
         if self.is_installed():
             logger.info(u"Désinstallation du paquet %s." % (self.id,))
             
-            application_root, install_dir = get_installation_dirs()
+            application_root, install_dir = self._get_installation_dirs()
             
             # Suppression de l'application
             rmtree(os.path.join(self.database.get_config('rootpath'),
@@ -177,34 +271,6 @@ class Application(object):
             
             # Suppression des fichiers de cache
             rmtree('./cache/installed/' + self.id)
-    
-    def check_size(self, dependency_tree):
-        """
-            Lève une exception s'il n'y a pas assez de place pour installer
-            l'application et ses dépendances
-            
-            Arguments :
-                dependency_tree : Arbre des dépendances
-        """
-        d, size_c, size_u = dependency_tree.get_size()
-        
-        rootpath = self.database.get_config("rootpath")
-        tmppath = self.database.get_config("tmppath")
-        
-        if os.path.splitext(rootpath)[0] == os.path.splitext(tmppath)[0]:
-            # Le dossier temporaire et la racine de la Framakey sont sur
-            # le même disque
-            remaining_space = get_free_space(rootpath) - size_c - size_u
-            if remaining_space < 0:
-                raise NotEnoughRootFreeSpace(-remaining_space)
-        else:
-            remaining_space = get_free_space(rootpath) - size_u
-            if remaining_space < 0:
-                raise NotEnoughRootFreeSpace(-remaining_space)
-            
-            remaining_space = get_free_space(tmppath) - size_c
-            if remaining_space < 0:
-                raise NotEnoughTmpFreeSpace(-remaining_space)
     
     def get_comments(self, limit=10):
         """
@@ -239,10 +305,6 @@ class Application(object):
         
         return self.comments
     
-    def get_dependency_tree(self):
-        """Renvoie l'arbre des dépendances de l'application"""
-        return DependencyTree(self.database, self)
-    
     def get_installed_version(self):
         """Renvoie :
                 Si l'application est installée : dictionnaire infos
@@ -268,41 +330,26 @@ class Application(object):
         else:
             return None
     
-    def get_rating(self):
+    def _get_rating(self):
         """
             Récupère l'évaluation de l'application
             
-            Renvoie :
-                Si le dépôt supporte les évaluations : tuple (rating, votes)
-                    rating : note sur 100
-                    votes : nombre de votes
-                Sinon : None
+            Renvoie : None
         """
-        if self.repository == None:
-            # Application locale non présente dans les dépôts
-            return None
+        logger.debug(u"Téléchargement de l'évaluation de l'application %s." % self.id)
+        args = {
+                    'application' : self.infos['id'],
+                    'branch' : self.infos['branch']
+               }
         
-        if self.votes == -2:
-            logger.debug(u"Les évaluations ne sont pas supportée pour l'application %s." % self.id)
-            return None
-        elif self.votes == -1:
-            logger.debug(u"Téléchargement de l'évaluation de l'application %s." % self.id)
-            args = {
-                        'application' : self.infos['id'],
-                        'branch' : self.infos['branch']
-                   }
-            
-            url = self.infos['repository'] + "/rating.php?" + urllib.urlencode(args)
-            
-            try:
-                tmp = json.loads(urllib2.urlopen(url).read())
-                self.set_rating(tmp['rating'], tmp['votes'])
-            except (urllib2.URLError, urllib2.HTTPError, ValueError):
-                self.set_rating(0, -2)
-                logger.debug(u"Impossible de télécharger l'évaluation.")
-                return None
+        url = self.infos['repository'] + "/rating.php?" + urllib.urlencode(args)
         
-        return (self.rating, self.votes)
+        try:
+            tmp = json.loads(urllib2.urlopen(url).read())
+            self._set_rating(tmp['rating'], tmp['votes'])
+        except (urllib2.URLError, urllib2.HTTPError, ValueError):
+            self._set_rating(0, -2)
+            logger.debug(u"Impossible de télécharger l'évaluation.")
     
     def get_screenshots(self):
         """
@@ -342,42 +389,12 @@ class Application(object):
             logger.warning(u"L'application %s est déjà installée" % self.id)
             raise ApplicationAlreadyInstalled(self)
         
-        dependency_tree = self.get_dependency_tree()
-        self.check_size(dependency_tree)
+        dependency_tree = self._get_dependency_tree()
+        self._check_size(dependency_tree)
         
-        callbacks = {'end': [lambda a: a.set_installed_as('explicit')]}
+        callbacks = {'end': [lambda a: a._set_installed_as('explicit')]}
         
         dependency_tree.install(callbacks)
-    
-    def get_installation_dirs(self, filename=None):
-        """
-            Arguments : 
-                filename : chemin vers le paquet (facultatif)
-            
-            Renvoie :
-                (application_root, install_dir)
-                    application_root : racine de l'application
-                    install_dir : dossier dans lequel le paquet doit être extrait
-        """
-        cfg = ConfigParser()
-        cfg = ConfigParser({'Show' : 'True', 'InstallDir' : 'Apps', 'ApplicationRoot' : 'Apps/%s' % self.id})
-        if filename:
-            try:
-                package = zipfile.ZipFile(filename, 'r')
-            except Exception as e:
-                logger.error("Le paquet %s n'est pas une archive zip." % self.id)
-                raise InvalidPackage(self, e)
-            
-            try:
-                inifile = package.read(self.id + '/App/AppInfo/installer.ini')
-                cfg.read_string(inifile.decode('utf-8'))
-            except:
-                return os.path.join('Apps', self.id), 'Apps'
-        else:
-            cfg.read('./cache/installed/' + self.id + '/installer.ini')
-            
-        
-        return cfg.get('Framakey', 'ApplicationRoot'), cfg.get('Framakey', 'InstallDir')
         
     def is_installed(self):
         """
@@ -405,37 +422,14 @@ class Application(object):
         else:
             return False
     
-    def set_installed_as(self, installed_as):
-        """
-            Modifie l'option InstalledAs dans le fichier installer.ini
-            
-            Arguments :
-                installed_as :
-                    'depend' si l'application a été installée en tant que
-                    dépendance, 'explicit' si l'application a été installée
-                    explicitement
-        """
-        filename = os.path.join('./cache/installed/', self.id, 'installer.ini')
-        
-        cfg = ConfigParser()
-        cfg.optionxform = str   # Pour conserver la casse
-        cfg.read(filename)
-        
-        if not cfg.has_section("Framakey"):
-            cfg.add_section("Framakey")
-        
-        cfg.set("Framakey", "InstalledAs", installed_as)
-        
-        with open(filename, "w") as f:
-            cfg.write(f)
-    
-    def set_rating(self, rating, votes):
-        """
-            Modifie (localement) l'évaluation et les votes de l'application
-        """
-        self.rating = rating
-        self.votes = votes
-        self.database.set_rating(self.id, self.branch, self.repository, rating, votes)
+    @property
+    def rating(self):
+        if self.infos['votes'] == -2:
+            logger.debug(u"Les évaluations ne sont pas supportée pour l'application %s." % self.id)
+            return None
+        elif self.infos['votes'] == -1:
+            self._get_rating()
+        return self.infos['rating']
     
     def uninstall(self):
         """
@@ -445,9 +439,18 @@ class Application(object):
             logger.warning(u"L'application %s n'est pas installée" % self.id)
             raise ApplicationNotInstalled(self)
         
-        dependency_tree = self.get_dependency_tree()
-        self.check_size(dependency_tree)
+        dependency_tree = self._get_dependency_tree()
+        self._check_size(dependency_tree)
         
-        callbacks = {'end': [lambda a: a.set_installed_as('explicit')]}
+        callbacks = {'end': [lambda a: a._set_installed_as('explicit')]}
         
         dependency_tree.install(callbacks)
+    
+    @property
+    def votes(self):
+        if self.infos['votes'] == -2:
+            logger.debug(u"Les évaluations ne sont pas supportée pour l'application %s." % self.id)
+            return None
+        elif self.infos['votes'] == -1:
+            self._get_rating()
+        return self.infos['rating']
