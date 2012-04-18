@@ -393,7 +393,9 @@ class Application(object):
         dependency_tree = self._get_dependency_tree()
         self._check_size(dependency_tree)
         
-        callbacks = {'end': [lambda a: a._set_installed_as('explicit')]}
+        if not callbacks.has_key('end'):
+            callbacks['end'] = []
+        callbacks['end'].append(lambda a: a._set_installed_as('explicit'))
         
         dependency_tree.install(callbacks)
         
