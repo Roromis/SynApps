@@ -27,7 +27,7 @@ class Application(object):
                     'Stable' : 2
                }
     
-    def __init__(self, database, infos, depends=None, icons=None, links=None):
+    def __init__(self, database, infos):
         """
             Initialisation : récupération des icônes et dépendances dans la base
             de donnée
@@ -67,20 +67,9 @@ class Application(object):
         self.infos = infos
         self.infos['version'] = version.LooseVersion(self.infos['version'])
         
-        if depends == None:
-            self.depends = database.get_depends(self.id, self.branch, self.repository)
-        else:
-            self.depends = depends
-        
-        if icons == None:
-            self.icons = database.get_icons(self.id, self.branch, self.repository)
-        else:
-            self.icons = icons
-        
-        if links == None:
-            self.links = database.get_links(self.id, self.branch, self.repository)
-        else:
-            self.links = links
+        self.depends = database.get_depends(self.id, self.branch, self.repository)
+        self.icons = database.get_icons(self.id, self.branch, self.repository)
+        self.links = database.get_links(self.id, self.branch, self.repository)
         
         self.comments = False
         self.screenshots = False
