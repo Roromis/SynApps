@@ -689,8 +689,8 @@ class database():
             
             Renvoie : La liste des applications installées qui en dépendent
         """
-        provides = self._query("SELECT id FROM depends"
-                              "WHERE depend = ? AND repository = ''", (id,))
+        provides = self._query("SELECT application FROM depends "
+                               "WHERE depend = ? AND repository = ''", (id,))
         return map(lambda (a,):a, provides)
     
     def get_repositories(self):

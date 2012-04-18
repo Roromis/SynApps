@@ -56,30 +56,43 @@ class Application(object):
                     infos['votes'] : Nombre de votes (-2 si les évaluations ne
                                      sont pas supportées, -1 si elles n'ont pas
                                      été téléchargées)
-                depends : Liste des identifiants des dépendances directes
-                icons : Dictionnaire contenant les icônes
-                    icons[size] : Chemin vers l'icône de taille size
-                links : Liste des liens
-                    links[i]['title'] : Titre du lien
-                    links[i]['uri'] : Adresse du lien
         """
         self.database = database
         self.infos = infos
         self.infos['version'] = version.LooseVersion(self.infos['version'])
         
         self.depends = database.get_depends(self.id, self.branch, self.repository)
+        self.provides = database.get_provides(self.id)
         self.icons = database.get_icons(self.id, self.branch, self.repository)
         self.links = database.get_links(self.id, self.branch, self.repository)
         
         self.comments = False
         self.screenshots = False
-
+    
+    def __eq__(self, y):
+        return self.id == y.id
+    
     def __getattr__(self, name):
         """
             Permet de renvoyer l'information name si l'attribut n'existe pas.
             Par exemple self.description vaut self.infos['description']
         """
         return self.infos[name]
+    
+    def __ne__(self, y):
+        return self.id != y.id
+    
+    def _check_provides(self, dependency_tree):
+        """
+            Lève une exception si des applications fournies sont installées
+            
+            Arguments :
+                dependency_tree : Arbre des dépendances (inversé)
+        """
+        provides = dependency_tree.get_installed()
+        
+        if provides != []:
+            raise ApplicationNeeded(self.id, [i.id for i in provides])
     
     def _check_size(self, dependency_tree):
         """
@@ -89,7 +102,7 @@ class Application(object):
             Arguments :
                 dependency_tree : Arbre des dépendances
         """
-        d, size_c, size_u = dependency_tree.get_size()
+        size_c, size_u = dependency_tree.get_size()
         
         rootpath = self.database.get_config("rootpath")
         tmppath = self.database.get_config("tmppath")
@@ -109,9 +122,9 @@ class Application(object):
             if remaining_space < 0:
                 raise NotEnoughTmpFreeSpace(-remaining_space)
     
-    def _get_dependency_tree(self):
+    def _get_dependency_tree(self, reverse=False):
         """Renvoie l'arbre des dépendances de l'application"""
-        return DependencyTree(self.database, self)
+        return DependencyTree(self.database, self, reverse)
     
     def _get_installation_dirs(self, filename=None):
         """
@@ -123,8 +136,8 @@ class Application(object):
                     application_root : racine de l'application
                     install_dir : dossier dans lequel le paquet doit être extrait
         """
-        cfg = ConfigParser()
         cfg = ConfigParser({'Show' : 'True', 'InstallDir' : 'Apps', 'ApplicationRoot' : 'Apps/%s' % self.id})
+        cfg.add_section('Framakey')
         if filename:
             try:
                 package = zipfile.ZipFile(filename, 'r')
@@ -186,8 +199,7 @@ class Application(object):
                             u"Extraction du paquet")
                         )
             except Exception as e:
-                logger.error(u"Le paquet %s est invalide:\n"
-                             u''.join(traceback.format_exc()) % self.id)
+                logger.error(u"Le paquet %s est invalide:\n" % (self.id,) + u''.join(traceback.format_exc()))
                 raise InvalidPackage(self, e)
             
             logger.debug(u"Suppression du paquet.")
@@ -372,7 +384,7 @@ class Application(object):
         
         return self.screenshots
     
-    def install(self):
+    def install(self, callbacks={}):
         """Installe l'application et ses dépendances"""
         if self.is_installed():
             logger.warning(u"L'application %s est déjà installée" % self.id)
@@ -420,20 +432,24 @@ class Application(object):
             self._get_rating()
         return self.infos['rating']
     
-    def uninstall(self):
+    def uninstall(self, with_provides=False, callbacks={}):
         """
             Désinstalle l'application
+            
+            Arguments :
+                with_provides : True si les applications fournies doivent être
+                                désinstallées avant, False sinon
+                                Si with_provides vaut false
         """
         if not self.is_installed():
             logger.warning(u"L'application %s n'est pas installée" % self.id)
             raise ApplicationNotInstalled(self)
         
-        dependency_tree = self._get_dependency_tree()
-        self._check_size(dependency_tree)
+        dependency_tree = self._get_dependency_tree(True)
+        if not with_provides:
+            self._check_provides(dependency_tree)
         
-        callbacks = {'end': [lambda a: a._set_installed_as('explicit')]}
-        
-        dependency_tree.install(callbacks)
+        dependency_tree.uninstall(callbacks)
     
     @property
     def votes(self):

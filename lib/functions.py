@@ -7,6 +7,7 @@ import ctypes
 import zipfile
 import hashlib
 from distutils import version
+import stat
 
 def cmp_version(a,b):
     """

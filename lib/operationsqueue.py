@@ -66,6 +66,7 @@ class OperationsQueue(deque):
             
             if self.current_operation == None:
                 # On exécute l'opération si aucune autre opération n'est en cours
+                # TODO : à faire dans un thread
                 self.next_operation()
     
     def append_install(self, application, callbacks):
@@ -207,6 +208,8 @@ class OperationsQueue(deque):
         
         if operation['type'] == "install":
             operation['application']._install(callback)
+        if operation['type'] == "uninstall":
+            operation['application']._uninstall(callback)
         
         self.current_operation = None
         self.current_progress = 0
@@ -222,8 +225,8 @@ class OperationsQueue(deque):
             
             Argument :
                 operation : opération
-                progress : Progression (en pourcents) (si event vaut 'install')
-                message : Message (si event vaut 'install')
+                progress : Progression (en pourcents) (si event vaut 'progress')
+                message : Message (si event vaut 'progress')
         """
         if event == 'progress':
             args = (operation['application'], progress, message)
