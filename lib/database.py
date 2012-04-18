@@ -348,7 +348,7 @@ class database():
         if branch == None:
             if repository == None:
                 apps = self._query("SELECT * FROM applications WHERE id = ?"
-                                  "ORDER BY version COLLATE desc_versions", (id,))
+                                  "ORDER BY version COLLATE desc_versions, repository DESC", (id,))
             else:
                 apps = self._query("SELECT * FROM applications WHERE id = ? "
                                   "AND repository = ? "
@@ -375,7 +375,7 @@ class database():
             if repository == None:
                 apps = self._query("SELECT * FROM applications WHERE id = ? "
                                   "AND branch ? "
-                                  "ORDER BY version COLLATE desc_versions", (id, branch))
+                                  "ORDER BY version COLLATE desc_versions, repository DESC", (id, branch))
             else:
                 apps = self._query("SELECT * FROM applications WHERE id = ? "
                                   "AND branch = ? "
