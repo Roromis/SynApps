@@ -6,7 +6,7 @@ import logging
 logger = logging.getLogger('synapps')
 
 import os
-from configparser import ConfigParser, NoSectionError, NoOptionError
+from cfg import ConfigParser, NoSectionError, NoOptionError
 import urllib, urllib2
 import json
 from distutils import version
@@ -127,18 +127,29 @@ class Application(object):
         """Renvoie l'arbre des dépendances de l'application"""
         return DependencyTree(self.database, self, reverse)
     
-    def _get_installation_dirs(self, filename=None):
+    def _get_installation_infos(self, filename=None):
         """
             Arguments : 
                 filename : chemin vers le paquet (facultatif)
             
             Renvoie :
-                (application_root, install_dir)
-                    application_root : racine de l'application
-                    install_dir : dossier dans lequel le paquet doit être extrait
+                
         """
-        cfg = ConfigParser({'Show' : 'True', 'InstallDir' : 'Apps', 'ApplicationRoot' : 'Apps/%s' % self.id})
-        cfg.add_section('Framakey')
+        infos = {}
+        
+        # Emplacement de l'application
+        infos['application_root'] = os.path.join('Apps', self.id)
+        infos['install_dir'] = 'Apps'
+        
+        infos['remove'] = {}
+        infos['remove']['files'] = []
+        infos['remove']['dirs'] = []
+        infos['remove']['main'] = ['App', 'Other']
+        infos['preserve'] = {}
+        infos['preserve']['files'] = []
+        infos['preserve']['dirs'] = []
+        
+        cfg = ConfigParser()
         if filename:
             try:
                 package = zipfile.ZipFile(filename, 'r')
@@ -150,12 +161,37 @@ class Application(object):
                 inifile = package.read(self.id + '/App/AppInfo/installer.ini')
                 cfg.read_string(inifile.decode('utf-8'))
             except:
-                return os.path.join('Apps', self.id), 'Apps'
+                return infos
         else:
             cfg.read('./cache/installed/' + self.id + '/installer.ini')
             
+        # Emplacement de l'application
+        infos['application_root'] = cfg.get('Framakey', 'ApplicationRoot', 'Apps/%s' % self.id)
+        infos['install_dir'] = cfg.get('Framakey', 'InstallDir', 'Apps',)
         
-        return cfg.get('Framakey', 'ApplicationRoot'), cfg.get('Framakey', 'InstallDir')
+        # Dossier principaux
+        if cfg.get('MainDirectories', 'RemoveAppDirectory', 'true').lower() != 'true':
+            infos['remove']['main'].remove('App')
+        
+        if cfg.get('MainDirectories', 'RemoveDataDirectory', 'false').lower() == 'true':
+            infos['remove']['main'].append('Data')
+        
+        if cfg.get('MainDirectories', 'RemoveOtherDirectory', 'true').lower() != 'true':
+            infos['remove']['main'].remove('Other')
+        
+        # Fichiers à supprimer
+        infos['remove']['files'] = [i.replace('\\', '/') for i in cfg.getlist('FilesToRemove', 'RemoveFile')]
+        
+        # Fichiers à conserver
+        infos['preserve']['files'] = [i.replace('\\', '/') for i in cfg.getlist('FilesToPreserve', 'PreserveFile')]
+        
+        # Dossiers à supprimer
+        infos['remove']['dirs'] = [i.replace('\\', '/') for i in cfg.getlist('DirectoriesToRemove', 'RemoveDirectory')]
+        
+        # Dossiers à conserver
+        infos['preserve']['dirs'] = [i.replace('\\', '/') for i in cfg.getlist('DirectoriesToPreserve', 'PreserveDirectory')]
+        
+        return infos
     
     def _install(self, callback, explicit):
         """
@@ -181,13 +217,13 @@ class Application(object):
                 steps = 1
             else:
                 steps = 2
-                filename = './cache/packages/' + self.id + '.fmk.zip'
+                filename = './cache/tmp/' + self.id + '.fmk.zip'
                 
                 logger.debug(u"Téléchargement du paquet.")
                 try:
                     urllib.urlretrieve(self.uri, filename, 
                             lambda c,b,t: callback(self, 'install',
-                                    100*(current_step*t + c*b)/t*steps,
+                                    100*(current_step*t + c*b)/(t*steps),
                                     u"Téléchargement du paquet")
                             )
                 except (urllib2.URLError, urllib2.HTTPError) as e:
@@ -198,10 +234,10 @@ class Application(object):
                 
             logger.debug(u"Extraction du paquet.")
             try:
-                application_root, install_dir = self._get_installation_dirs(filename)
+                infos = self._get_installation_infos(filename)
                 zipextractall(filename,
                         os.path.join(self.database.get_config('rootpath'),
-                                     install_dir),
+                                     infos['install_dir']),
                         lambda c,t: callback(self, 'install',
                             100*(current_step*t + c)/(t*steps),
                             u"Extraction du paquet")
@@ -216,7 +252,7 @@ class Application(object):
             logger.debug(u"Copie des informations dans le cache.")
             cache = os.path.join('./cache/installed/', self.id)
             appinfo = os.path.join(self.database.get_config("rootpath"),
-                                   application_root, 'App', 'AppInfo')
+                                   infos['application_root'], 'App', 'AppInfo')
             
             # Copie dans le cache
             os.mkdir(cache)
@@ -279,11 +315,11 @@ class Application(object):
         if self.is_installed():
             logger.info(u"Désinstallation du paquet %s." % (self.id,))
             
-            application_root, install_dir = self._get_installation_dirs()
+            infos = self._get_installation_infos()
             
             # Suppression de l'application
             rmtree(os.path.join(self.database.get_config('rootpath'),
-                                application_root), False,
+                                infos['application_root']), False,
                                 lambda c,t: callback(self, 'uninstall', 100*c/t,
                                                 u"Suppression de l'application")
                     )
@@ -292,6 +328,132 @@ class Application(object):
             rmtree('./cache/installed/' + self.id)
             
             callback(self, 'uninstall', 100, u"Désinstallation terminée", True)
+    
+    def _upgrade(self, callback):
+        """
+            Met à jour l'application
+            
+            Arguments :
+                callback : fonction de signature def callback(application, type, progress, message, end=False)
+                    application : application installée
+                    type : type d'opération
+                    progress : Avancement (sur 100)
+                    message : message décrivant l'opération en cours
+                    end : True si l'opération est terminée, False sinon
+        """
+        if self.is_installed() and not self.is_up_to_date():
+            logger.info(u"Mise à jour du paquet %s." % (self.id,))
+            
+            current_step = 0
+            if os.path.isfile(self.uri):
+                # Le paquet est un fichier local
+                filename = self.uri
+                steps = 3
+            else:
+                steps = 4
+                filename = './cache/tmp/' + self.id + '.fmk.zip'
+                
+                logger.debug(u"Téléchargement du paquet.")
+                try:
+                    urllib.urlretrieve(self.uri, filename, 
+                            lambda c,b,t: callback(self, 'upgrade',
+                                    100*(current_step*t + c*b)/(t*steps),
+                                    u"Téléchargement du paquet")
+                            )
+                except (urllib2.URLError, urllib2.HTTPError) as e:
+                    logger.error(u"Erreur lors du téléchargement:\n"
+                                 u''.join(traceback.format_exc()))
+                    raise PackageDownloadError(self, e)
+                current_step += 1
+            
+            logger.debug(u"Suppression de l'ancienne version.")
+            callback(self, 'upgrade', 100*current_step/steps, u"Suppression de l'ancienne version")
+            #TODO (?) : Progression
+            
+            try:
+                infos = self._get_installation_infos(filename)
+            except Exception as e:
+                logger.error(u"Le paquet %s est invalide:\n" % (self.id,) + u''.join(traceback.format_exc()))
+                raise InvalidPackage(self, e)
+            
+            for f in infos['remove']['files']:
+                os.remove(os.path.join(self.database.get_config('rootpath'), infos['application_root'], f))
+            
+            for f in infos['preserve']['files']:
+                src = os.path.join(self.database.get_config('rootpath'), infos['application_root'], f)
+                dst = os.path.join('./cache/tmp', self.id, f)
+                if os.path.isfile(src):
+                    if not os.path.isdir(os.path.dirname(dst)):
+                        os.makedirs(os.path.dirname(dst))
+                    os.rename(src, dst)
+            
+            for d in infos['remove']['dirs']:
+                rmtree(os.path.join(self.database.get_config('rootpath'), infos['application_root'], d))
+            
+            for d in infos['preserve']['dirs']:
+                src = os.path.join(self.database.get_config('rootpath'), infos['application_root'], d)
+                dst = os.path.join('./cache/tmp', self.id, d)
+                if os.path.isfile(src):
+                    if not os.path.isdir(os.path.dirname(dst)):
+                        os.makedirs(os.path.dirname(dst))
+                    os.rename(src, dst)
+            
+            for d in infos['remove']['main']:
+                rmtree(os.path.join(self.database.get_config('rootpath'), infos['application_root'], d))
+            
+            logger.debug(u"Extraction du paquet.")
+            current_step += 1
+            
+            backupfiles = []
+            for root, dirnames, filenames in os.walk(os.path.join('./cache/tmp', self.id)):
+                for f in filenames:
+                    backupfiles.append(os.path.relpath(os.path.join(root, f), os.path.join('./cache/tmp', self.id)))
+            
+            try:
+                zipextractall(filename,
+                        os.path.join(self.database.get_config('rootpath'),
+                                     infos['install_dir']),
+                        lambda c,t: callback(self, 'upgrade',
+                            100*(current_step*t + c)/(t*steps),
+                            u"Extraction du paquet"),
+                        exclude=backupfiles
+                        )
+            except Exception as e:
+                logger.error(u"Le paquet %s est invalide:\n" % (self.id,) + u''.join(traceback.format_exc()))
+                raise InvalidPackage(self, e)
+            
+            logger.debug(u"Copie de la sauvegarde")
+            current_step += 1
+            for f in backupfiles:
+                src = os.path.join('./cache/tmp', self.id, f)
+                dst = os.path.join(self.database.get_config('rootpath'), infos['application_root'], f)
+                if os.path.isfile(src):
+                    if not os.path.isdir(os.path.dirname(dst)):
+                        os.makedirs(os.path.dirname(dst))
+                    os.rename(src, dst)
+            
+            rmtree(os.path.join('./cache/tmp', self.id))
+            
+            logger.debug(u"Suppression du paquet.")
+            os.remove(filename)
+            
+            logger.debug(u"Copie des informations dans le cache.")
+            cache = os.path.join('./cache/installed/', self.id)
+            appinfo = os.path.join(self.database.get_config("rootpath"),
+                                   infos['application_root'], 'App', 'AppInfo')
+            installed_as = self.get_installed_as()
+            
+            # Copie dans le cache
+            rmtree(cache)
+            os.mkdir(cache)
+            if os.path.isdir(appinfo):
+                for i in os.listdir(appinfo):
+                    shutil.copy(os.path.join(appinfo, i), cache)
+            
+            # Modification du fichier installer.ini
+            self._set_installed_as(installed_as)
+                
+            callback(self, 'upgrade', 100, u"Mise à jour terminée", True)
     
     def get_comments(self, limit=10):
         """
@@ -326,6 +488,14 @@ class Application(object):
         
         return self.comments
     
+    def get_installed_as(self):
+        filename = os.path.join('./cache/installed/', self.id, 'installer.ini')
+        cfg = ConfigParser()
+        cfg.optionxform = str   # Pour conserver la casse
+        cfg.read(filename)
+        
+        return cfg.get("Framakey", "InstalledAs", "explicit")
+    
     def get_installed_version(self):
         """Renvoie :
                 Si l'application est installée : dictionnaire infos
@@ -341,7 +511,7 @@ class Application(object):
             try:
                 try:
                     infos['branch'] = cfg.get('Framakey', 'Branch')
-                except NoOptionError:       # Rétrocompatibilité
+                except NoOptionError: # Rétrocompatibilité
                     infos['branch'] = cfg.get('Framakey', 'Repository')
                 infos['version'] = version.LooseVersion(cfg.get('Version', 'PackageVersion'))
             except (NoSectionError, NoOptionError):
@@ -435,7 +605,7 @@ class Application(object):
             if installed['version'] > self.version:
                 return True
             elif installed['version'] == self.version:
-                return self.branch[installed['branch']] > self.branches[self.branch]
+                return self.branches[installed['branch']] > self.branches[self.branch]
             else:
                 return False
         else:
@@ -468,6 +638,28 @@ class Application(object):
             self._check_required_by(dependency_tree)
         
         dependency_tree.uninstall(callback)
+    
+    def upgrade(self, callback):
+        """Met à jour l'application et vérifie ses dépendances"""
+        if not self.is_installed():
+            logger.warning(u"L'application %s n'est pas installée" % self.id)
+            raise ApplicationNotInstalled(self)
+        if self.is_up_to_date():
+            logger.warning(u"L'application %s est déjà à jour" % self.id)
+            raise ApplicationAlreadyUpToDate(self)
+        
+        nonexisting_depends = []
+        for d in self.depends:
+            try:
+                app = database.get_application(d)
+            except NoSuchApplication:
+                # L'application n'existe pas
+                nonexisting_depends.append(d)
+            else:
+                if not app.is_installed():
+                    app.install()
+        
+        self.database.jobs_queue.append_upgrade(self, callback)
     
     @property
     def votes(self):

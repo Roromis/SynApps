@@ -1,19 +1,6 @@
 #!/usr/bin/python2
 # -*- coding: utf-8 -*-
 
-class ApplicationAlreadyInstalled(Exception):
-    """
-        Exception levée lorsque l'application à installer est déjà installée.
-
-        Attributs:
-            application : Classe application
-    """
-    def __init__(self, application):
-        self.application = application
-    
-    def __str__(self):
-        return u"L'application %s est deja installee." % self.application.id
-
 class ApplicationAlreadyInQueue(Exception):
     """
         Exception levée lorsque l'application est déjà dans la queue
@@ -25,7 +12,33 @@ class ApplicationAlreadyInQueue(Exception):
         self.application = application
     
     def __str__(self):
-        return u"L'application %s est deja dans la queue." % self.application.id
+        return u"L'application %s est déjà dans la queue." % self.application.id
+
+class ApplicationAlreadyInstalled(Exception):
+    """
+        Exception levée lorsque l'application à installer est déjà installée.
+
+        Attributs:
+            application : Classe application
+    """
+    def __init__(self, application):
+        self.application = application
+    
+    def __str__(self):
+        return u"L'application %s est deja installée." % self.application.id
+
+class ApplicationAlreadyUpToDate(Exception):
+    """
+        Exception levée lorsque l'application à mettre à jour est déjà à jour.
+
+        Attributs:
+            application : Classe application
+    """
+    def __init__(self, application):
+        self.application = application
+    
+    def __str__(self):
+        return u"L'application %s est deja à jour." % self.application.id
 
 class ApplicationNeeded(Exception):
     """
@@ -60,7 +73,7 @@ class ApplicationNotInstalled(Exception):
         self.application = application
     
     def __str__(self):
-        return u"L'application %s n'est pas installee." % self.application.id
+        return u"L'application %s n'est pas installée." % self.application.id
 
 class InvalidDepends(Exception):
     """
@@ -124,7 +137,7 @@ class NonExistingDepends(Exception):
             return u', '.join(self.depends[:-1]) + u' et ' + self.depends[-1]
     
     def __str__(self):
-        return u"Les dependances %s de l'application %s sont introuvables." % (self.str_of_list(), self.application)
+        return u"Les dépendances %s de l'application %s sont introuvables." % (self.str_of_list(), self.application)
 
 class NoSuchApplication(Exception):
     """
@@ -151,7 +164,7 @@ class NoSuchApplication(Exception):
         else:
             repository = u"le depot %s."
         
-        return u"L'application %s%s n'est pas presente dans %s" % (branch, self.id, repository)
+        return u"L'application %s:%s n'est pas présente dans %s" % (branch, self.id, repository)
 
 class NotEnoughRootFreeSpace(Exception):
     """
@@ -165,7 +178,7 @@ class NotEnoughRootFreeSpace(Exception):
         self.space = space
     
     def __str__(self):
-        return u"Pas assez d'espace disponible (%d octets supplementaires necessaires)." % self.space
+        return u"Pas assez d'espace disponible (%d octets supplémentaires necessaires)." % self.space
 
 class NotEnoughTmpFreeSpace(Exception):
     """
@@ -179,7 +192,7 @@ class NotEnoughTmpFreeSpace(Exception):
         self.space = space
     
     def __str__(self):
-        return u"Pas assez d'espace disponible (%d octets supplementaires necessaires)." % self.space
+        return u"Pas assez d'espace disponible (%d octets supplémentaires necessaires)." % self.space
 
 class PackageDownloadError(Exception):
     """
@@ -194,7 +207,7 @@ class PackageDownloadError(Exception):
         self.error = error
     
     def __str__(self):
-        return u"Erreur lors du telechargement de l'application %s." % self.application.id
+        return u"Erreur lors du téléchargement de l'application %s." % self.application.id
         
 class RepositoryConnectionError(Exception):
     """
@@ -209,4 +222,4 @@ class RepositoryConnectionError(Exception):
         self.error = error
     
     def __str__(self):
-        return u"Erreur lors de la connection au depot %s." % self.repository
+        return u"Erreur lors de la connection au dépôt %s." % self.repository

@@ -144,8 +144,10 @@ class JobsQueue(deque):
         
         if job['type'] == "install":
             job['application']._install(job['callback'], **job['kwargs'])
-        if job['type'] == "uninstall":
+        elif job['type'] == "uninstall":
             job['application']._uninstall(job['callback'], **job['kwargs'])
+        elif job['type'] == "upgrade":
+            job['application']._upgrade(job['callback'], **job['kwargs'])
         
         self.current_job = None
         

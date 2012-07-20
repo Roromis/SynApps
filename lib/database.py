@@ -10,7 +10,7 @@ import sqlite3
 import urllib2
 import hashlib
 import shutil
-from configparser import ConfigParser, NoSectionError, NoOptionError
+from cfg import ConfigParser, NoSectionError, NoOptionError
 from distutils import version
 from locale import strcoll
 
@@ -44,15 +44,9 @@ def get_application_cfg_infos(cfg, section, repository):
 
 def get_category_cfg_infos(cfg, category):
     """Récupère les informations sur une catégorie dans le dépôt."""
-    if cfg.has_option('categories', category):
-        icon_uri = cfg.get('categories', category)
-    else:
-        icon_uri = ''
+    icon_uri = cfg.get('categories', category, '')
+    newhash = cfg.get('categories_hash', category, '')
         
-    if cfg.has_option('categories_hash', category):
-        newhash = cfg.get('categories_hash', category)
-    else:
-        newhash = ''
     return (category, icon_uri, newhash, cfg)
 
 def get_category_parent(id):
@@ -163,7 +157,7 @@ class database():
             # Ajout de la configuration par défaut
             logger.debug(u"Ajout de la configuration par défaut.")
             self.set_config('rootpath', '../../Scripts/Framakey')#'..\..\..\..')
-            self.set_config('tmppath', './cache/packages')
+            self.set_config('tmppath', './cache/tmp')
             self.set_config('version', '0.3 alpha 1')
             self.set_config('show_stable', True)
             self.set_config('show_unstable', True)
@@ -403,10 +397,10 @@ class database():
         repository = u''
         
         try:
-            cfg = ConfigParser({'Show' : 'True', 'InstallDir' : 'Apps', 'ApplicationRoot' : 'Apps/%s' % id})
+            cfg = ConfigParser()
             cfg.read(['./cache/installed/' + id + '/appinfo.ini', './cache/installed/' + id + '/installer.ini'])
             
-            root = os.path.join(self.get_config('rootpath'), cfg.get('Framakey', 'ApplicationRoot'))
+            root = os.path.join(self.get_config('rootpath'), cfg.get('Framakey', 'ApplicationRoot', 'Apps/%s' % id))
             if os.path.exists(root):
                 size_u = get_size(root)
             else:
@@ -428,17 +422,13 @@ class database():
             version = cfg.get('Version', 'PackageVersion')
             license = cfg.get('Framakey', 'License')
             author = cfg.get('Details', 'Publisher')
-            show = cfg.getboolean('Framakey', 'Show')
+            show = cfg.getboolean('Framakey', 'Show', True)
             uri = ''
         except (NoSectionError, NoOptionError):
             logger.debug(u"Les informations de l'application %s sont incomplètes." % id)
             return None, None, None
         
-        depends = []
-        i = 1
-        while cfg.has_option('Framakey', 'Depend%d'%i):
-            depends.append(cfg.get('Framakey', 'Depend%d'%i))
-            i += 1
+        depends = cfg.getlist('Framakey', 'Depend')
         
         links = []
         try:
@@ -772,10 +762,9 @@ class database():
                 cfg = get_repository_cfg(repository['uri'])
                 
                 logger.debug(u"Insertion des recommendations du dépôt.")
-                i = 1
-                while cfg.has_option('repository', 'recommendation%d'%i):
-                    self._add_recommendation(repository['uri'], cfg.get('repository', 'recommendation%d'%i))
-                    i += 1
+                
+                for recommendation in cfg.getlist('repository', 'recommendation'):
+                    self._add_recommendation(repository['uri'], recommendation)
                 
                 logger.debug(u"Insertion des applications du dépôt.")
                 for section in cfg.sections():
@@ -786,15 +775,11 @@ class database():
                             self._add_application(*get_application_cfg_infos(cfg, section, repository['uri']))
                             self._add_category(*get_category_cfg_infos(cfg, cfg.get(section, 'category')))
                             
-                            i = 1
-                            while cfg.has_option(section, 'link%d'%i):
-                                self._add_link(id, branch, repository['uri'], cfg.get(section, 'link%d_name'%i), cfg.get(section, 'link%d'%i))
-                                i += 1
+                            for name,uri in zip(cfg.getlist(section, 'link%d_name'),cfg.getlist(section, 'link')):
+                                self._add_link(id, branch, repository['uri'], name, uri)
                             
-                            i = 1
-                            while cfg.has_option(section, 'depend%d'%i):
-                                self._add_depend(id, branch, repository['uri'], cfg.get(section, 'depend%d'%i))
-                                i += 1
+                            for depend in cfg.getlist(section, 'depend'):
+                                self._add_depend(id, branch, repository['uri'], depend)
                             
                             for size in [32,48,64,128]:
                                 if cfg.has_option(section, 'icon_%d'%size):

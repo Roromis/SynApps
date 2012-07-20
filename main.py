@@ -26,6 +26,8 @@ import sys
 import locale
 import traceback
 
+from lib.functions import rmtree
+
 logger = logging.getLogger('synapps')
 logger.setLevel(logging.DEBUG)
 
@@ -46,7 +48,7 @@ logger.addHandler(debugfile)
 def logging_excepthook(type, value, tb):
     logger.error(u''.join(traceback.format_exception(type, value, tb)))
     
-    # TODO : gui (quitter la boucle) et session (supprimer le fichier)
+    # TODO : gui (quitter la boucle), session (supprimer le fichier) et afficher un message d'erreur
     
     sys.exit()
 
@@ -64,8 +66,9 @@ def main():
         os.mkdir('./cache/icons')
     if not os.path.isdir('./cache/installed'):
         os.mkdir('./cache/installed')
-    if not os.path.isdir('./cache/packages'):
-        os.mkdir('./cache/packages')
+    if os.path.isdir('./cache/tmp'):
+        rmtree('./cache/tmp')  # Au cas où SynApps a planté
+    os.mkdir('./cache/tmp')
     
     db = database()
     logger.debug(u"Version : %s" % db.get_config("version"))
