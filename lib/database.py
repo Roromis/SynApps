@@ -16,7 +16,7 @@ from locale import strcoll
 
 from category import Category
 from application import Application
-from operationsqueue import OperationsQueue
+from jobsqueue import JobsQueue
 
 from exceptions import *
 from functions import get_size, cmp_version, md5file
@@ -185,7 +185,7 @@ class database():
         self.connection.create_collation("desc_versions", cmp_version)
         
         # Queue des opérations
-        self.operations_queue = OperationsQueue()
+        self.jobs_queue = JobsQueue()
         
     def _add_application(self, id, branch, repository, category, name,
                         friendly_name, short_description,
@@ -682,16 +682,16 @@ class database():
                            (id, branch, repository))
         return map(dict, links)
     
-    def get_provides(self, id):
+    def get_required_by(self, id):
         """
             Arguments :
                 id : Identifiant de l'application
             
             Renvoie : La liste des applications installées qui en dépendent
         """
-        provides = self._query("SELECT application FROM depends "
+        required_by = self._query("SELECT application FROM depends "
                                "WHERE depend = ? AND repository = ''", (id,))
-        return map(lambda (a,):a, provides)
+        return map(lambda (a,):a, required_by)
     
     def get_repositories(self):
         """Renvoie : La liste des dépôts"""

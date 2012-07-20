@@ -23,7 +23,7 @@ class DependencyTree(object):
         nonexisting_depends = []
         
         if reverse:
-            l = root.provides
+            l = root.required_by
         else:
             l = root.depends
         
@@ -84,14 +84,14 @@ class DependencyTree(object):
             
         return size_c, size_u
     
-    def install(self, callbacks={}):
+    def install(self, callback, explicit=False):
         """Installe les dépendances, puis la racine (parcours postfixe)"""
         
         if not self.root.is_installed():
             for child in self.children:
-                child.install()
+                child.install(callback)
             
-            self.database.operations_queue.append_install(self.root, callbacks)
+            self.database.jobs_queue.append_install(self.root, callback, explicit=explicit)
     
     def to_list(self, l=[]):
         if not self.root in l:
@@ -100,7 +100,7 @@ class DependencyTree(object):
                 l = child.to_list(l)
         return l
     
-    def uninstall(self, callbacks={}):
+    def uninstall(self, callback):
         """
             Désinstalle les applications fournies, puis la racine (parcours
             postfixe)
@@ -108,6 +108,6 @@ class DependencyTree(object):
         
         if self.root.is_installed():
             for child in self.children:
-                child.uninstall()
+                child.uninstall(callback)
             
-            self.database.operations_queue.append_uninstall(self.root, callbacks)
+            self.database.jobs_queue.append_uninstall(self.root, callback)

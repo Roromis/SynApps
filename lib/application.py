@@ -62,7 +62,7 @@ class Application(object):
         self.infos['version'] = version.LooseVersion(self.infos['version'])
         
         self.depends = database.get_depends(self.id, self.branch, self.repository)
-        self.provides = database.get_provides(self.id)
+        self.required_by = database.get_required_by(self.id)
         self.icons = database.get_icons(self.id, self.branch, self.repository)
         self.links = database.get_links(self.id, self.branch, self.repository)
         
@@ -82,17 +82,18 @@ class Application(object):
     def __ne__(self, y):
         return self.id != y.id
     
-    def _check_provides(self, dependency_tree):
+    def _check_required_by(self, dependency_tree):
         """
-            Lève une exception si des applications fournies sont installées
+            Lève une exception si l'application est une dépendance
+            d'applications installées
             
             Arguments :
                 dependency_tree : Arbre des dépendances (inversé)
         """
-        provides = dependency_tree.get_installed()
+        required_by = dependency_tree.get_installed()
         
-        if provides != []:
-            raise ApplicationNeeded(self.id, [i.id for i in provides])
+        if required_by != []:
+            raise ApplicationNeeded(self.id, [i.id for i in required_by])
     
     def _check_size(self, dependency_tree):
         """
@@ -156,12 +157,19 @@ class Application(object):
         
         return cfg.get('Framakey', 'ApplicationRoot'), cfg.get('Framakey', 'InstallDir')
     
-    def _install(self, callback):
+    def _install(self, callback, explicit):
         """
             Installe l'application (sans dépendances, sans vérifications)
             
             Arguments :
-                callback : fonction de signature def callback(progress, message)
+                callback : fonction de signature def callback(application, type, progress, message, end=False)
+                    application : application installée
+                    type : type d'opération
+                    progress : Avancement (sur 100)
+                    message : message décrivant l'opération en cours
+                    end : True si l'opération est terminée, False sinon
+                explicit : True si l'application est installée explicitement,
+                           False si elle est installée en tant que dépendance.
         """
         if not self.is_installed():
             logger.info(u"Installation du paquet %s." % (self.id,))
@@ -178,8 +186,8 @@ class Application(object):
                 logger.debug(u"Téléchargement du paquet.")
                 try:
                     urllib.urlretrieve(self.uri, filename, 
-                            lambda c,b,t: callback(
-                                    current_step*100/steps + 100*c*b/(t*steps),
+                            lambda c,b,t: callback(self, 'install',
+                                    100*(current_step*t + c*b)/t*steps,
                                     u"Téléchargement du paquet")
                             )
                 except (urllib2.URLError, urllib2.HTTPError) as e:
@@ -194,8 +202,8 @@ class Application(object):
                 zipextractall(filename,
                         os.path.join(self.database.get_config('rootpath'),
                                      install_dir),
-                        lambda c,t: callback(
-                            current_step*100/steps + 100*c/(t*steps),
+                        lambda c,t: callback(self, 'install',
+                            100*(current_step*t + c)/(t*steps),
                             u"Extraction du paquet")
                         )
             except Exception as e:
@@ -217,7 +225,12 @@ class Application(object):
                     shutil.copy(os.path.join(appinfo, i), cache)
             
             # Modification du fichier installer.ini
-            self._set_installed_as("depend")
+            if explicit:
+                self._set_installed_as("explicit")
+            else:
+                self._set_installed_as("depend")
+                
+            callback(self, 'install', 100, u"Installation terminée", True)
     
     def _set_installed_as(self, installed_as):
         """
@@ -256,7 +269,12 @@ class Application(object):
             Désinstalle l'application
             
             Arguments :
-                callback : fonction de signature def callback(progress, message)
+                callback : fonction de signature def callback(application, type, progress, message, end=False)
+                    application : application installée
+                    type : type d'opération
+                    progress : Avancement (sur 100)
+                    message : message décrivant l'opération en cours
+                    end : True si l'opération est terminée, False sinon
         """
         if self.is_installed():
             logger.info(u"Désinstallation du paquet %s." % (self.id,))
@@ -266,12 +284,14 @@ class Application(object):
             # Suppression de l'application
             rmtree(os.path.join(self.database.get_config('rootpath'),
                                 application_root), False,
-                                lambda c,t: callback(100*c/t,
+                                lambda c,t: callback(self, 'uninstall', 100*c/t,
                                                 u"Suppression de l'application")
                     )
             
             # Suppression des fichiers de cache
             rmtree('./cache/installed/' + self.id)
+            
+            callback(self, 'uninstall', 100, u"Désinstallation terminée", True)
     
     def get_comments(self, limit=10):
         """
@@ -384,7 +404,7 @@ class Application(object):
         
         return self.screenshots
     
-    def install(self, callbacks={}):
+    def install(self, callback):
         """Installe l'application et ses dépendances"""
         if self.is_installed():
             logger.warning(u"L'application %s est déjà installée" % self.id)
@@ -393,11 +413,7 @@ class Application(object):
         dependency_tree = self._get_dependency_tree()
         self._check_size(dependency_tree)
         
-        if not callbacks.has_key('end'):
-            callbacks['end'] = []
-        callbacks['end'].append(lambda a: a._set_installed_as('explicit'))
-        
-        dependency_tree.install(callbacks)
+        dependency_tree.install(callback, True)
         
     def is_installed(self):
         """
@@ -434,24 +450,24 @@ class Application(object):
             self._get_rating()
         return self.infos['rating']
     
-    def uninstall(self, with_provides=False, callbacks={}):
+    def uninstall(self, with_required_by=False, callback=None):
         """
             Désinstalle l'application
             
             Arguments :
-                with_provides : True si les applications fournies doivent être
-                                désinstallées avant, False sinon
-                                Si with_provides vaut false
+                with_required_by : True si les applications qui dépendent de
+                                   l'application à désinstaller doivent être
+                                   désinstallées avant, False sinon
         """
         if not self.is_installed():
             logger.warning(u"L'application %s n'est pas installée" % self.id)
             raise ApplicationNotInstalled(self)
         
         dependency_tree = self._get_dependency_tree(True)
-        if not with_provides:
-            self._check_provides(dependency_tree)
+        if not with_required_by:
+            self._check_required_by(dependency_tree)
         
-        dependency_tree.uninstall(callbacks)
+        dependency_tree.uninstall(callback)
     
     @property
     def votes(self):
