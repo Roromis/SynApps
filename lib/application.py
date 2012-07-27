@@ -37,7 +37,7 @@ class Application(object):
                 infos : dictionnaire contenant les informations de
                         l'applications
                     infos['id'] : Identifiant de l'application
-                    infos['branch'] : Brance ('Stable', 'Unstable' ou 'Testing')
+                    infos['branch'] : Branche ('Stable', 'Unstable' ou 'Testing')
                     infos['repository'] : Adresse du dépôt
                     infos['category'] : Catégorie (categorie/sous categorie/...)
                     infos['name'] : Nom de l'application

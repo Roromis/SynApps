@@ -227,7 +227,11 @@ class database():
                 cfg : Objet ConfigParser associé au fichier de configuration du
                       dépôt
         """
-        hash = self._get_category_hash(id)
+        try:
+            hash = self._get_category_hash(id)
+        except NoSuchCategory:
+            hash = None
+        
         if newhash == None:
             # La catégorie est celle d'une application installée, pas d'informations
              if hash == None:
@@ -380,6 +384,13 @@ class database():
             else:
                 raise NoSuchApplication(id, branch, repository)
     
+    def _get_category_infos(self, id):
+        infos = {}
+        infos['id'] = id
+        hash = self._get_category_hash(id)
+        infos['icon'] = './cache/icons/' + hash + '.png'
+        return infos
+    
     def _get_category_hash(self, id):
         """
             Argument :
@@ -391,7 +402,7 @@ class database():
             return self._query("SELECT hash FROM categories "
                     "WHERE id = ?", (id,))[0][0]
         except IndexError:
-            return None
+            raise NoSuchCategory(id)
 
     def _get_installed_application_cfg_infos(self, id):
         repository = u''
@@ -569,20 +580,7 @@ class database():
             
             Renvoie : La catégorie correspondante
         """
-        return Category(self, id)
-    
-    def get_category_icon(self, id):
-        """
-            Argument :
-                id : Identificant de la catégorie
-            
-            Renvoie : L'icône de la catégorie
-        """
-        hash = self._get_category_hash(id)
-        if hash:
-            return './cache/icons/' + hash + '.png'
-        else:
-            return None
+        return Category(self, self._get_category_infos(id))
 
     def get_config(self, name, default=None):
         """

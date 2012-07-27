@@ -166,6 +166,19 @@ class NoSuchApplication(Exception):
         
         return u"L'application %s:%s n'est pas présente dans %s" % (branch, self.id, repository)
 
+class NoSuchCategory(Exception):
+    """
+        Exception levée lorsque la catégorie recherchée n'existe pas.
+
+        Attributs:
+            id         : Identifiant de la catégorie
+    """
+    def __init__(self, id):
+        self.id = id
+    
+    def __str__(self):
+        return u"La catégorie %s n'existe pas" % (self.id,)
+
 class NotEnoughRootFreeSpace(Exception):
     """
         Exception levée lorsqu'il n'y a pas assez d'espace pour installer

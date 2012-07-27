@@ -6,17 +6,26 @@ import logging
 logger = logging.getLogger('synapps')
 
 class Category(object):
-    def __init__(self, database, id):
+    def __init__(self, database, infos):
         """
             Initialisation : récupération de l'icône dans la base de donnée
             
             Arguments :
                 database : Base de donnée
-                id : Identifiant de la catégorie
+                infos : dictionnaire contenant les informations de
+                        la catégorie
+                    infos['id'] : Identifiant de la catégorie
+                    infos['icon'] : Icône de la catégorie
         """
         self.database = database
-        self.id = id
-        self.icon = database.get_category_icon(self.id)
+        self.infos = infos
+    
+    def __getattr__(self, name):
+        """
+            Permet de renvoyer l'information name si l'attribut n'existe pas.
+            Par exemple self.id vaut self.infos['id']
+        """
+        return self.infos[name]
     
     def count_applications(self):
         """
